@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRM de Atendimento — telas do sistema</title>
+<style>
+  :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --bg:#f6f7fa; --card:#fff; --primary:#1d4ed8; --side:#0f172a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif; color:var(--ink); background:var(--bg); line-height:1.5; }
+  header { background:var(--side); color:#fff; padding:2rem 1.5rem; }
+  header .wrap { max-width:1200px; margin:0 auto; }
+  header h1 { margin:0 0 .4rem; font-size:1.8rem; }
+  header p { margin:0; color:#cbd5e1; max-width:70ch; }
+  .notice { background:#fef3c7; color:#92400e; border-bottom:1px solid #fcd34d; padding:.7rem 1.5rem; font-size:.92rem; }
+  .notice .wrap { max-width:1200px; margin:0 auto; }
+  nav { position:sticky; top:0; background:#fff; border-bottom:1px solid var(--line); z-index:5; }
+  nav .wrap { max-width:1200px; margin:0 auto; display:flex; gap:.25rem; overflow-x:auto; padding:.4rem 1rem; }
+  nav a { white-space:nowrap; padding:.45rem .8rem; border-radius:8px; color:var(--ink); text-decoration:none; font-weight:600; font-size:.9rem; }
+  nav a:hover { background:#eef2ff; color:var(--primary); }
+  main { max-width:1200px; margin:0 auto; padding:1.5rem 1rem 4rem; }
+  section { margin-top:2.5rem; }
+  section h2 { font-size:1.35rem; margin:0 0 .3rem; }
+  section > p { margin:0 0 1rem; color:var(--muted); max-width:80ch; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px,1fr)); gap:1.2rem; }
+  figure { margin:0; background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(16,24,40,.08); }
+  figure a { display:block; background:#e5e7eb; }
+  figure img { width:100%; display:block; aspect-ratio:1366/860; object-fit:cover; object-position:top; }
+  figure.phone img { aspect-ratio:420/860; object-fit:contain; background:#111827; }
+  figcaption { padding:.7rem .9rem; }
+  figcaption strong { display:block; margin-bottom:.15rem; }
+  figcaption span { color:var(--muted); font-size:.88rem; }
+  footer { text-align:center; color:var(--muted); font-size:.85rem; padding:2rem 1rem; border-top:1px solid var(--line); }
+  footer a { color:var(--primary); }
+  .lightbox { position:fixed; inset:0; background:rgba(15,23,42,.92); display:none; align-items:center; justify-content:center; padding:1rem; z-index:50; cursor:zoom-out; }
+  .lightbox.open { display:flex; }
+  .lightbox img { max-width:100%; max-height:100%; border-radius:8px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1>CRM de Atendimento — telas do sistema</h1>
+  <p>Apresentação visual do CRM para equipes de atendimento de até 10 pessoas. Todas as imagens foram capturadas do sistema em execução, em modo de demonstração com dados fictícios. Clique em uma tela para ampliar.</p>
+</div></header>
+<div class="notice"><div class="wrap">Esta página mostra apenas as telas. O sistema real precisa de um servidor Node.js e banco PostgreSQL para funcionar; o código está no repositório <a href="https://github.com/altaimpactoprojetos-blip/crmempresa1">altaimpactoprojetos-blip/crmempresa1</a>.</div></div>
+<nav><div class="wrap">
+  <a href="#acesso">Acesso</a><a href="#dashboard">Dashboard</a><a href="#clientes">Clientes</a><a href="#atendimentos">Atendimentos</a><a href="#funil">Funil</a><a href="#tarefas">Tarefas</a><a href="#relatorios">Relatórios</a><a href="#configuracoes">Configurações</a><a href="#atendente">Visão do atendente</a>
+</div></nav>
+<main>
+<section id="acesso"><h2>Acesso</h2><p>Login individual com recuperação de senha. Três perfis: administrador, supervisor e atendente.</p><div class="grid">
+<figure><a href="telas/01-login.png" data-zoom><img src="telas/01-login.png" alt="Tela de login" loading="lazy"></a><figcaption><strong>Tela de login</strong><span>Nome e logotipo da empresa configuráveis.</span></figcaption></figure>
+<figure><a href="telas/02-esqueci-senha.png" data-zoom><img src="telas/02-esqueci-senha.png" alt="Recuperação de senha" loading="lazy"></a><figcaption><strong>Recuperação de senha</strong><span>Envia link por e-mail ou, sem SMTP, o administrador gera o link.</span></figcaption></figure>
+<figure><a href="telas/34-perfil.png" data-zoom><img src="telas/34-perfil.png" alt="Meu perfil" loading="lazy"></a><figcaption><strong>Meu perfil</strong><span>Troca de senha pelo próprio usuário.</span></figcaption></figure>
+</div></section>
+<section id="dashboard"><h2>Dashboard</h2><p>Indicadores calculados a partir dos registros reais, fila de espera e tarefas do dia.</p><div class="grid">
+<figure><a href="telas/03-dashboard.png" data-zoom><img src="telas/03-dashboard.png" alt="Visão geral" loading="lazy"></a><figcaption><strong>Visão geral</strong><span>Em espera, abertos, resolvidos, tempos médios, oportunidades e conversão.</span></figcaption></figure>
+<figure><a href="telas/04-notificacoes.png" data-zoom><img src="telas/04-notificacoes.png" alt="Notificações internas" loading="lazy"></a><figcaption><strong>Notificações internas</strong><span>Alertas de tarefas atrasadas, retornos pendentes e atendimentos atribuídos.</span></figcaption></figure>
+<figure><a href="telas/05-busca-rapida.png" data-zoom><img src="telas/05-busca-rapida.png" alt="Busca rápida" loading="lazy"></a><figcaption><strong>Busca rápida</strong><span>Encontra clientes e protocolos de qualquer tela.</span></figcaption></figure>
+</div></section>
+<section id="clientes"><h2>Clientes</h2><p>Cadastro completo com responsável, etiquetas, histórico e aviso de duplicidade.</p><div class="grid">
+<figure><a href="telas/06-clientes.png" data-zoom><img src="telas/06-clientes.png" alt="Lista de clientes" loading="lazy"></a><figcaption><strong>Lista de clientes</strong><span>Filtros por origem, responsável, etiqueta e retorno pendente.</span></figcaption></figure>
+<figure><a href="telas/07-novo-cliente-duplicidade.png" data-zoom><img src="telas/07-novo-cliente-duplicidade.png" alt="Novo cliente" loading="lazy"></a><figcaption><strong>Novo cliente</strong><span>Aviso de possível duplicidade por telefone ou e-mail antes de salvar.</span></figcaption></figure>
+<figure><a href="telas/08-importar-csv.png" data-zoom><img src="telas/08-importar-csv.png" alt="Importação por CSV" loading="lazy"></a><figcaption><strong>Importação por CSV</strong><span>Prévia com validação linha a linha e relatório de erros.</span></figcaption></figure>
+<figure><a href="telas/09-cliente-detalhe.png" data-zoom><img src="telas/09-cliente-detalhe.png" alt="Página do cliente" loading="lazy"></a><figcaption><strong>Página do cliente</strong><span>Atendimentos, negociações, tarefas, anotações internas e botão do WhatsApp.</span></figcaption></figure>
+</div></section>
+<section id="atendimentos"><h2>Atendimentos</h2><p>Central com fila de espera, protocolo único, cinco status e linha do tempo de tudo que aconteceu.</p><div class="grid">
+<figure><a href="telas/10-fila-espera.png" data-zoom><img src="telas/10-fila-espera.png" alt="Fila de espera" loading="lazy"></a><figcaption><strong>Fila de espera</strong><span>Atendimentos aguardando; o botão Assumir impede que duas pessoas peguem o mesmo.</span></figcaption></figure>
+<figure><a href="telas/11-atendimentos-todos.png" data-zoom><img src="telas/11-atendimentos-todos.png" alt="Todos os atendimentos" loading="lazy"></a><figcaption><strong>Todos os atendimentos</strong><span>Filtros por status, prioridade, canal, responsável e período; exportação CSV.</span></figcaption></figure>
+<figure><a href="telas/12-abrir-atendimento.png" data-zoom><img src="telas/12-abrir-atendimento.png" alt="Abrir atendimento" loading="lazy"></a><figcaption><strong>Abrir atendimento</strong><span>Cliente, assunto, canal, prioridade, responsável ou distribuição em rodízio.</span></figcaption></figure>
+<figure><a href="telas/13-atendimento-detalhe.png" data-zoom><img src="telas/13-atendimento-detalhe.png" alt="Detalhe do atendimento" loading="lazy"></a><figcaption><strong>Detalhe do atendimento</strong><span>Ações: assumir, transferir, devolver à fila, agendar retorno, resolver, cancelar, reabrir.</span></figcaption></figure>
+<figure><a href="telas/14-transferir.png" data-zoom><img src="telas/14-transferir.png" alt="Transferir" loading="lazy"></a><figcaption><strong>Transferir</strong><span>Escolha do novo responsável com motivo; fica registrado quem transferiu.</span></figcaption></figure>
+<figure><a href="telas/15-agendar-retorno.png" data-zoom><img src="telas/15-agendar-retorno.png" alt="Agendar retorno" loading="lazy"></a><figcaption><strong>Agendar retorno</strong><span>Cria uma tarefa de retorno para o responsável.</span></figcaption></figure>
+<figure><a href="telas/16-linha-do-tempo.png" data-zoom><img src="telas/16-linha-do-tempo.png" alt="Linha do tempo" loading="lazy"></a><figcaption><strong>Linha do tempo</strong><span>Interações, anotações internas e eventos do sistema com autor e horário.</span></figcaption></figure>
+</div></section>
+<section id="funil"><h2>Funil comercial</h2><p>Quadro Kanban com etapas configuráveis. A etapa comercial é independente do status do atendimento.</p><div class="grid">
+<figure><a href="telas/17-funil-kanban.png" data-zoom><img src="telas/17-funil-kanban.png" alt="Kanban" loading="lazy"></a><figcaption><strong>Kanban</strong><span>Arraste os cartões entre as etapas; valores somados por coluna.</span></figcaption></figure>
+<figure><a href="telas/18-oportunidade-detalhe.png" data-zoom><img src="telas/18-oportunidade-detalhe.png" alt="Detalhe da oportunidade" loading="lazy"></a><figcaption><strong>Detalhe da oportunidade</strong><span>Valor, próxima ação, previsão de fechamento e histórico de movimentações.</span></figcaption></figure>
+<figure><a href="telas/19-nova-oportunidade.png" data-zoom><img src="telas/19-nova-oportunidade.png" alt="Nova oportunidade" loading="lazy"></a><figcaption><strong>Nova oportunidade</strong><span>Ao marcar como perdida, o motivo é obrigatório.</span></figcaption></figure>
+</div></section>
+<section id="tarefas"><h2>Tarefas e retornos</h2><p>Tarefas vinculadas a clientes, atendimentos e oportunidades.</p><div class="grid">
+<figure><a href="telas/20-tarefas.png" data-zoom><img src="telas/20-tarefas.png" alt="Tarefas de hoje" loading="lazy"></a><figcaption><strong>Tarefas de hoje</strong><span>Abas: hoje, atrasadas, futuras, todas abertas e concluídas.</span></figcaption></figure>
+<figure><a href="telas/21-tarefas-atrasadas.png" data-zoom><img src="telas/21-tarefas-atrasadas.png" alt="Atrasadas" loading="lazy"></a><figcaption><strong>Atrasadas</strong><span>Destaque em vermelho para prazos vencidos.</span></figcaption></figure>
+<figure><a href="telas/22-nova-tarefa.png" data-zoom><img src="telas/22-nova-tarefa.png" alt="Nova tarefa" loading="lazy"></a><figcaption><strong>Nova tarefa</strong><span>Responsável, prazo, prioridade e vínculo com cliente.</span></figcaption></figure>
+</div></section>
+<section id="relatorios"><h2>Relatórios</h2><p>Filtros por período, atendente, origem, canal e status, com explicação de como cada indicador é calculado.</p><div class="grid">
+<figure><a href="telas/23-relatorios.png" data-zoom><img src="telas/23-relatorios.png" alt="Indicadores de atendimento" loading="lazy"></a><figcaption><strong>Indicadores de atendimento</strong><span>Tempo médio de primeira resposta e de resolução, por responsável, status, canal e origem.</span></figcaption></figure>
+<figure><a href="telas/24-relatorios-comercial.png" data-zoom><img src="telas/24-relatorios-comercial.png" alt="Indicadores comerciais" loading="lazy"></a><figcaption><strong>Indicadores comerciais</strong><span>Oportunidades abertas, ganhos, perdidos, conversão e motivos de perda.</span></figcaption></figure>
+<figure><a href="telas/25-relatorio-vazio.png" data-zoom><img src="telas/25-relatorio-vazio.png" alt="Sem dados" loading="lazy"></a><figcaption><strong>Sem dados</strong><span>Estado vazio claro quando o período não tem registros.</span></figcaption></figure>
+</div></section>
+<section id="configuracoes"><h2>Configurações</h2><p>Identidade visual, equipe, funil, canais, integrações, backup e auditoria.</p><div class="grid">
+<figure><a href="telas/26-config-empresa.png" data-zoom><img src="telas/26-config-empresa.png" alt="Empresa" loading="lazy"></a><figcaption><strong>Empresa</strong><span>Nome, logotipo, cores, distribuição automática e modo de demonstração.</span></figcaption></figure>
+<figure><a href="telas/27-config-usuarios.png" data-zoom><img src="telas/27-config-usuarios.png" alt="Usuários" loading="lazy"></a><figcaption><strong>Usuários</strong><span>Perfis, desativação com transferência de pendências e link de redefinição de senha.</span></figcaption></figure>
+<figure><a href="telas/28-novo-usuario.png" data-zoom><img src="telas/28-novo-usuario.png" alt="Novo usuário" loading="lazy"></a><figcaption><strong>Novo usuário</strong><span>Explicação do que cada perfil pode fazer.</span></figcaption></figure>
+<figure><a href="telas/29-config-funil.png" data-zoom><img src="telas/29-config-funil.png" alt="Etapas do funil" loading="lazy"></a><figcaption><strong>Etapas do funil</strong><span>Ordem e tipo de cada etapa.</span></figcaption></figure>
+<figure><a href="telas/30-config-canais.png" data-zoom><img src="telas/30-config-canais.png" alt="Canais e origens" loading="lazy"></a><figcaption><strong>Canais e origens</strong><span>Listas editáveis usadas nos cadastros.</span></figcaption></figure>
+<figure><a href="telas/31-integracoes.png" data-zoom><img src="telas/31-integracoes.png" alt="Integrações" loading="lazy"></a><figcaption><strong>Integrações</strong><span>WhatsApp oficial aparece como desconectado sem credenciais; nada é simulado.</span></figcaption></figure>
+<figure><a href="telas/32-backup.png" data-zoom><img src="telas/32-backup.png" alt="Backup" loading="lazy"></a><figcaption><strong>Backup</strong><span>Instruções de backup e restauração.</span></figcaption></figure>
+<figure><a href="telas/33-auditoria.png" data-zoom><img src="telas/33-auditoria.png" alt="Auditoria" loading="lazy"></a><figcaption><strong>Auditoria</strong><span>Registro de quem fez o quê, quando e de qual IP.</span></figcaption></figure>
+</div></section>
+<section id="atendente"><h2>Visão do atendente</h2><p>O atendente vê apenas seus clientes e atendimentos e a fila compartilhada.</p><div class="grid">
+<figure><a href="telas/35-atendente-dashboard.png" data-zoom><img src="telas/35-atendente-dashboard.png" alt="Dashboard do atendente" loading="lazy"></a><figcaption><strong>Dashboard do atendente</strong><span>Indicadores restritos aos próprios números e chave de disponibilidade.</span></figcaption></figure>
+<figure><a href="telas/36-atendente-fila.png" data-zoom><img src="telas/36-atendente-fila.png" alt="Fila do atendente" loading="lazy"></a><figcaption><strong>Fila do atendente</strong><span>Pode assumir da fila; não vê atendimentos de colegas.</span></figcaption></figure>
+<figure><a href="telas/37-atendente-configuracoes.png" data-zoom><img src="telas/37-atendente-configuracoes.png" alt="Configurações limitadas" loading="lazy"></a><figcaption><strong>Configurações limitadas</strong><span>Apenas consulta; alterações exigem administrador.</span></figcaption></figure>
+<figure class="phone"><a href="telas/38-celular-dashboard.png" data-zoom><img src="telas/38-celular-dashboard.png" alt="Em celular" loading="lazy"></a><figcaption><strong>Em celular</strong><span>Layout responsivo, com prioridade ao uso em computador.</span></figcaption></figure>
+</div></section>
+</main>
+<footer>CRM de Atendimento · Node.js + PostgreSQL · <a href="https://github.com/altaimpactoprojetos-blip/crmempresa1">Código-fonte e instruções de instalação</a></footer>
+<div class="lightbox" id="lb"><img alt=""></div>
+<script>
+  const lb = document.getElementById('lb'), lbImg = lb.querySelector('img');
+  document.querySelectorAll('[data-zoom]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); lbImg.src = a.href; lb.classList.add('open'); }));
+  lb.addEventListener('click', () => lb.classList.remove('open'));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') lb.classList.remove('open'); });
+</script>
+</body>
+</html>
