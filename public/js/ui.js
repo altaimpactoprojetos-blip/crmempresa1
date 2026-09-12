@@ -157,7 +157,7 @@ UI.modal = ({ title, body, footer, size = '', onClose }) => {
   back.addEventListener('click', (e) => { if (e.target === back || e.target.closest('[data-close]')) close(); });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(back);
-  const first = back.querySelector('input:not([type=hidden]):not([readonly]), select, textarea, button:not([data-close])'); if (first) setTimeout(() => first.focus(), 30);
+  const first = back.querySelector('input:not([type=hidden]):not([readonly]), select, textarea, button:not([data-close])'); if (first) first.focus();
   return { el: back, close };
 };
 
@@ -175,7 +175,7 @@ UI.drawer = ({ title, body, footer, size = '', onClose }) => {
   back.addEventListener('click', (e) => { if (e.target === back || e.target.closest('[data-close]')) close(); });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(back);
-  const first = back.querySelector('.drawer-body button, .drawer-body input, .drawer-body a'); if (first) setTimeout(() => first.focus(), 30);
+  const first = back.querySelector('.drawer-body button, .drawer-body input, .drawer-body a'); if (first) first.focus();
   return { el: back, close, body: back.querySelector('.drawer-body'), setTitle: (t) => { back.querySelector('#drawerTitle').textContent = t; } };
 };
 

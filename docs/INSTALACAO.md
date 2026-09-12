@@ -28,7 +28,7 @@ cp .env.example .env
 | `COOKIE_SECURE` | produção | `true` quando servido por HTTPS |
 | `NODE_ENV` | produção | `production` |
 | `SMTP_*`, `MAIL_FROM` | não | Envio do e-mail de recuperação de senha |
-| `WHATSAPP_*` | não | Integração com a API oficial do WhatsApp |
+| `WHATSAPP_*` | não | Integração com a API oficial do WhatsApp (ver seção 6) |
 
 O arquivo `.env` **não deve ser versionado** (já está no `.gitignore`). Em produção o servidor se recusa a iniciar com o `SESSION_SECRET` de exemplo.
 
@@ -102,7 +102,20 @@ O sistema roda em um único processo (as notificações em tempo real são em me
 2. Preencha `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN` (valor à sua escolha) e `WHATSAPP_APP_SECRET` no `.env` e reinicie.
 3. No painel da Meta, configure o webhook para `https://SEU_DOMINIO/api/whatsapp/webhook` com o mesmo *verify token* e assine o campo `messages`.
 
-Mensagens recebidas são associadas ao cliente pelo telefone e ao atendimento aberto mais recente. Sem credenciais, a tela **Configurações › Integrações** mostra "Desconectado" e nada é simulado.
+4. Abra **Configurações › Integrações**: o painel mostra o estado real (credenciais, webhook verificável, validação de assinatura, último evento recebido, último erro) e lista as pendências. Envie uma mensagem de teste ao número; ela deve aparecer na central como um atendimento na fila.
+
+Comportamento com a integração ativa:
+
+- Mensagens recebidas são vinculadas ao cliente pelo telefone (criando o cliente quando não existe) e ao atendimento aberto mais recente (abrindo um novo na fila quando não há). Eventos repetidos são ignorados pelo `wa_message_id`.
+- Respostas enviadas pela central usam a API e recebem os status enviado → entregue → lido → falhou. Texto livre só é aceito até 24 h após a última mensagem do cliente; fora da janela a central pede um **modelo aprovado** (template).
+- Mídias recebidas (imagem, documento, áudio, vídeo) ficam como anexos e são baixadas pelo servidor, com o token, quando consultadas.
+- O webhook responde 200 imediatamente e processa em seguida; falhas ficam registradas em "último erro".
+
+Sem credenciais, a tela mostra "Desconectado", nada é simulado e a central identifica os registros como manuais.
+
+## 6.1 Automações
+
+As regras de **Configurações › Automações** são avaliadas pelo próprio servidor: gatilhos por evento (atendimento aberto, cliente respondeu, mudança de etapa) disparam na hora; gatilhos agendados (prazo vencido, retorno vencido, oportunidade parada) rodam a cada minuto. Cada execução fica no histórico com chave de deduplicação, então reiniciar o serviço não repete ações. O botão "Verificar agora" executa as verificações agendadas imediatamente.
 
 ## 7. Backup e restauração
 

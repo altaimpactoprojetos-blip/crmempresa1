@@ -2,7 +2,9 @@
 
 CRM de nível intermediário para equipes de atendimento de até ~10 pessoas trabalhando simultaneamente. Interface em português do Brasil, backend próprio em Node.js e banco PostgreSQL.
 
-**Módulos:** Dashboard · Clientes · Atendimentos (fila, protocolo, rodízio) · Funil comercial (Kanban) · Tarefas e retornos · Relatórios · Configurações (identidade visual, usuários, funil, integrações, backup, auditoria).
+**Módulos:** Painel do dia · Central de conversas (lista, conversa e contexto do cliente; visão em tabela para supervisão) · Clientes · Funil comercial (quadro e lista, múltiplos funis, painel lateral) · Tarefas e retornos · Relatórios · Automações (gatilho → condição → ação) · Configurações (identidade visual, usuários e equipes, funis, canais, respostas rápidas, integrações, backup, auditoria).
+
+Organização e experiência inspiradas no Kommo, com identidade própria: branco, cinzas neutros, azul-marinho na estrutura e uma cor principal configurável para ações.
 
 ## Requisitos
 
@@ -32,6 +34,24 @@ Instruções completas (criação do banco, produção com HTTPS, serviço syste
 
 As permissões são validadas no servidor em todas as rotas. Usuários podem ser **desativados sem perder histórico**, com transferência obrigatória das pendências para outro responsável.
 
+## Central de conversas
+
+- **Três áreas:** lista de conversas (cliente, prévia da última mensagem, horário, canal, responsável, não lidas e prazo de resposta), conversa selecionada (mensagens, notas internas destacadas, status de envio/entrega/leitura quando vindos da API) e contexto (dados do cliente, negociação com troca de etapa, tarefas, anexos e outros atendimentos).
+- **Filtros:** Meus, Fila, Sem resposta, Aguardando cliente, Todos abertos, Encerrados, além de canal, responsável e prioridade. Filtros salvos por usuário ou compartilhados pela supervisão.
+- **Responder:** texto ao cliente (pela API oficial do WhatsApp quando conectada; caso contrário, registro manual identificado), nota interna (nunca vai ao cliente) ou registro de mensagem recebida. Respostas rápidas por botão ou `/atalho`, anexos até 2 MB, `Ctrl+Enter` envia.
+- **Prazo de resposta:** configurável em Configurações › Empresa (padrão 30 min). Conta desde a última mensagem do cliente sem resposta; vencidos aparecem em texto e cor.
+- **Visão em tabela** (`Atendimentos › Visão em tabela`): colunas selecionáveis, ordenação, paginação, filtros salvos e exportação CSV.
+
+## Funil e painel
+
+- Quadro Kanban com contagem e valor por etapa, cartões na ordem cliente → oportunidade → valor → responsável → último contato → próxima ação. "Sem próxima ação" e "Prazo vencido" são sinalizados com texto e cor. Alternância entre quadro e lista, filtros salvos e **múltiplos funis** (Configurações › Funis).
+- Painel lateral da oportunidade mantém o funil visível e permite editar campos comuns diretamente; mover para Perdido exige motivo. A etapa comercial é independente do status do atendimento.
+- Painel do dia: primeiro o que exige ação (fila, sem resposta, retornos vencidos, oportunidades sem próxima ação), cada indicador abre os registros correspondentes e tem ajuda explicando o cálculo. Atendentes veem pendências pessoais e próximos contatos; supervisão vê carga da equipe, cumprimento de prazo e resultado comercial.
+
+## Automações
+
+Regras em Configurações › Automações: gatilho (atendimento aberto, cliente respondeu, prazo de resposta vencido, retorno vencido, oportunidade mudou de etapa, oportunidade parada) → condição (canal, prioridade, etapa, funil, minutos/dias, equipe) → ação (criar tarefa, notificar, distribuir em rodízio, alterar prioridade, etiquetar cliente, enviar mensagem pelo canal conectado). Cada regra pode ser ativada ou pausada e tem histórico de execução. Tarefas duplicadas são evitadas; acompanhamentos são encerrados automaticamente quando o cliente responde ou a negociação é fechada. As verificações agendadas rodam a cada minuto no servidor.
+
 ## Fluxo de atendimento
 
 1. Cadastrar o cliente (aviso de duplicidade por telefone/e-mail).
@@ -51,8 +71,9 @@ A fila é atualizada em tempo real entre os usuários (Server-Sent Events) e tod
 
 ## WhatsApp
 
-- O botão **Abrir WhatsApp** apenas abre a conversa no aplicativo (`wa.me`). Ele **não sincroniza mensagens** com o CRM; registre as interações manualmente no atendimento.
-- A integração com a **API oficial (Meta Cloud API)** é opcional. Sem `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID`, ela aparece como *Desconectada* e nenhum envio é simulado. Com credenciais, envios e recebimentos (via webhook) ficam gravados no histórico do cliente/atendimento.
+- **Sem credenciais:** Configurações › Integrações mostra *Desconectado* com as pendências exatas; nada é simulado. "Abrir no WhatsApp" continua como atalho externo (`wa.me`) e as interações são registradas manualmente na conversa, identificadas como "registro manual".
+- **Com a API oficial (Meta Cloud API) configurada no servidor:** mensagens recebidas são vinculadas ao cliente pelo telefone (criando o cliente quando não existe) e ao atendimento aberto mais recente (abrindo um novo na fila quando não há). Eventos repetidos são ignorados pelo identificador da mensagem. Respostas enviadas pela central mostram enviado → entregue → lido → falhou conforme os eventos da Meta. Texto livre respeita a janela de 24h; fora dela a central pede um modelo aprovado. Mídias recebidas viram anexos consultáveis.
+- Credenciais ficam apenas em variáveis de ambiente; a área administrativa exibe estado, último evento, último erro, contagem de mensagens e o passo a passo técnico.
 
 ## Segurança
 
@@ -82,7 +103,7 @@ createdb crm_test            # ou: CREATE DATABASE crm_test OWNER crm;
 npm test                     # usa DATABASE_URL_TEST (padrão postgres://crm:crm@localhost:5432/crm_test)
 ```
 
-Os testes de integração cobrem o fluxo completo (cliente → atendimento → assumir → interação → oportunidade → retorno → transferência → encerramento), permissões entre perfis, disputa simultânea pelo mesmo atendimento, rodízio, desativação de usuário, recuperação de senha, importação CSV, controle de versão e relatórios.
+Os testes de integração (24 casos) cobrem o fluxo completo (cliente → atendimento → assumir → interação → oportunidade → retorno → transferência → encerramento), permissões entre perfis, disputa simultânea pelo mesmo atendimento, rodízio, desativação de usuário, recuperação de senha, importação CSV, controle de versão, relatórios, central de conversas (contadores, prazo, anexos), respostas rápidas, filtros salvos, funis múltiplos, automações (deduplicação, encerramento de acompanhamentos, agendadas) e a integração WhatsApp com a API da Meta simulada (webhook idempotente, status, janela de 24h).
 
 ## Estrutura
 
@@ -90,9 +111,10 @@ Os testes de integração cobrem o fluxo completo (cliente → atendimento → a
 src/
   server.js, app.js        # servidor Express, sessões, segurança
   config.js, db.js         # variáveis de ambiente e pool PostgreSQL
-  migrations/*.sql         # esquema do banco (aplicado por npm run migrate)
-  routes/                  # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications, whatsapp
-  middleware/, lib/        # autenticação/permissões, validação, auditoria, tempo real, e-mail
+  migrations/*.sql         # esquema do banco (aplicado por npm run migrate; 003 adiciona conversas, funis, automações)
+  routes/                  # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications, whatsapp,
+                           # quick-replies, saved-filters, automations
+  middleware/, lib/        # autenticação/permissões, validação, auditoria, tempo real, e-mail, whatsapp (API), automations
 public/                    # frontend (SPA sem build): index.html, css/, js/
 scripts/                   # migrate, create-admin, seed-demo, backup.sh, restore.sh
 tests/                     # testes de integração (node:test)
