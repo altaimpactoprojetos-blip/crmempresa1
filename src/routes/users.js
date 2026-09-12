@@ -18,9 +18,9 @@ router.get('/', async (req, res, next) => {
   try {
     const includeInactive = req.query.include_inactive === 'true' && req.user.role !== 'atendente';
     const { rows } = await query(
-      `SELECT id, name, email, role, active, available, last_login_at, created_at
+      `SELECT id, name, email, role, active, available, team, last_login_at, created_at
        FROM users ${includeInactive ? '' : 'WHERE active'} ORDER BY active DESC, name`);
-    const list = req.user.role === 'admin' ? rows : rows.map((u) => ({ id: u.id, name: u.name, role: u.role, active: u.active, available: u.available }));
+    const list = req.user.role === 'admin' ? rows : rows.map((u) => ({ id: u.id, name: u.name, role: u.role, active: u.active, available: u.available, team: u.team }));
     res.json({ users: list });
   } catch (err) { next(err); }
 });
@@ -31,6 +31,7 @@ const userSchema = z.object({
   role: z.enum(ROLES),
   password: z.string().min(8, 'A senha deve ter ao menos 8 caracteres.').max(200).optional(),
   available: z.boolean().optional(),
+  team: z.string().trim().max(60).nullable().optional(),
 });
 
 router.post('/', requireRole('admin'), validate(userSchema.required({ password: true })), async (req, res, next) => {
@@ -40,9 +41,9 @@ router.post('/', requireRole('admin'), validate(userSchema.required({ password: 
     if (dup.rowCount) return next(badRequest('Já existe um usuário com este e-mail.', { fields: { email: 'E-mail já cadastrado.' } }));
     const hash = await bcrypt.hash(d.password, 12);
     const { rows } = await query(
-      `INSERT INTO users (name, email, password_hash, role, available) VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, name, email, role, active, available, created_at`,
-      [d.name, d.email, hash, d.role, d.available !== false]);
+      `INSERT INTO users (name, email, password_hash, role, available, team) VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, name, email, role, active, available, team, created_at`,
+      [d.name, d.email, hash, d.role, d.available !== false, d.team || null]);
     await audit(req, 'user_create', 'user', rows[0].id, { email: d.email, role: d.role });
     res.status(201).json({ user: rows[0], message: 'Usuário criado com sucesso.' });
   } catch (err) { next(err); }
@@ -64,9 +65,9 @@ router.put('/:id', requireRole('admin'), validate(userSchema.partial()), async (
     const hash = d.password ? await bcrypt.hash(d.password, 12) : null;
     const { rows } = await query(
       `UPDATE users SET name = COALESCE($1, name), email = COALESCE($2, email), role = COALESCE($3, role),
-        password_hash = COALESCE($4, password_hash), available = COALESCE($5, available), updated_at = now()
-       WHERE id = $6 RETURNING id, name, email, role, active, available`,
-      [d.name ?? null, d.email ?? null, d.role ?? null, hash, d.available ?? null, id]);
+        password_hash = COALESCE($4, password_hash), available = COALESCE($5, available), team = CASE WHEN $7::boolean THEN $8 ELSE team END, updated_at = now()
+       WHERE id = $6 RETURNING id, name, email, role, active, available, team`,
+      [d.name ?? null, d.email ?? null, d.role ?? null, hash, d.available ?? null, id, d.team !== undefined, d.team ?? null]);
     await audit(req, 'user_update', 'user', id, { fields: Object.keys(d).filter((k) => k !== 'password'), password_changed: Boolean(hash) });
     res.json({ user: rows[0], message: 'Usuário atualizado.' });
   } catch (err) { next(err); }

@@ -9,6 +9,7 @@ const { audit } = require('../lib/audit');
 const { broadcast } = require('../lib/realtime');
 const { notify } = require('../lib/notify');
 const { nextProtocol, toCsv } = require('../lib/util');
+const automations = require('../lib/automations');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -24,9 +25,17 @@ function scopeSql(user, params, alias = 't') {
   return `(${alias}.assignee_id = $${params.length} OR ${alias}.assignee_id IS NULL)`;
 }
 
-const SELECT = `SELECT t.*, c.name AS customer_name, c.phone AS customer_phone, c.company AS customer_company,
-  u.name AS assignee_name, cb.name AS created_by_name
-  FROM tickets t JOIN customers c ON c.id = t.customer_id LEFT JOIN users u ON u.id = t.assignee_id LEFT JOIN users cb ON cb.id = t.created_by`;
+// "Aguardando resposta": o cliente falou por último (ou ninguém respondeu ainda) e o atendimento está ativo.
+const AWAITING = `(t.status IN ('aguardando','em_atendimento') AND (t.last_agent_message_at IS NULL OR COALESCE(t.last_customer_message_at, t.opened_at) > t.last_agent_message_at))`;
+const RESPONSE_DUE = `CASE WHEN ${AWAITING} THEN COALESCE(t.last_customer_message_at, t.opened_at) + (cs.response_sla_minutes || ' minutes')::interval ELSE NULL END`;
+
+const SELECT_COLS = `t.*, c.name AS customer_name, c.phone AS customer_phone, c.phone_digits AS customer_phone_digits, c.company AS customer_company, c.email AS customer_email, c.tags AS customer_tags,
+  u.name AS assignee_name, cb.name AS created_by_name, ${AWAITING} AS awaiting_reply, ${RESPONSE_DUE} AS response_due_at, cs.response_sla_minutes,
+  (SELECT count(*)::int FROM tasks tk WHERE tk.ticket_id = t.id AND tk.done_at IS NULL) AS open_tasks,
+  (SELECT count(*)::int FROM opportunities o JOIN pipeline_stages s ON s.id = o.stage_id WHERE o.customer_id = t.customer_id AND s.kind = 'open') AS open_opportunities,
+  (SELECT count(*)::int FROM ticket_attachments a WHERE a.ticket_id = t.id) AS attachments_count`;
+const FROM = `FROM tickets t JOIN customers c ON c.id = t.customer_id LEFT JOIN users u ON u.id = t.assignee_id LEFT JOIN users cb ON cb.id = t.created_by CROSS JOIN company_settings cs`;
+const SELECT = `SELECT ${SELECT_COLS} ${FROM}`;
 
 async function loadTicket(req, id, client) {
   const q = client ? client.query.bind(client) : query;
@@ -37,19 +46,32 @@ async function loadTicket(req, id, client) {
   return rows[0];
 }
 
+// Insere um evento na linha do tempo e mantém os campos resumidos da conversa.
 async function addEvent(client, ticketId, userId, kind, body, extra = {}) {
   const { rows } = await client.query(
     `INSERT INTO ticket_events (ticket_id, user_id, kind, direction, channel, body, payload) VALUES ($1,$2,$3,$4,$5,$6,$7)
      RETURNING *, (SELECT name FROM users WHERE id = $2) AS user_name`,
     [ticketId, userId, kind, extra.direction || null, extra.channel || null, body, JSON.stringify(extra.payload || {})]);
+  if (kind === 'interaction') {
+    const out = extra.direction === 'saida';
+    await client.query(
+      `UPDATE tickets SET last_message_at = now(), last_message_preview = left($2, 160), last_message_direction = $3,
+        last_customer_message_at = CASE WHEN $4::boolean THEN last_customer_message_at ELSE now() END,
+        last_agent_message_at = CASE WHEN $4::boolean THEN now() ELSE last_agent_message_at END,
+        unread_count = CASE WHEN $4::boolean THEN 0 ELSE unread_count + 1 END,
+        first_response_at = CASE WHEN $4::boolean THEN COALESCE(first_response_at, now()) ELSE first_response_at END,
+        updated_at = now() WHERE id = $1`, [ticketId, body || '', extra.direction || null, out]);
+  } else {
+    await client.query('UPDATE tickets SET updated_at = now() WHERE id = $1', [ticketId]);
+  }
   return rows[0];
 }
 
 // Rodízio: próximo atendente ativo e disponível que recebeu atendimento há mais tempo.
-async function pickNextAttendant(client, excludeId) {
+async function pickNextAttendant(client, excludeId, team) {
   const { rows } = await client.query(
-    `SELECT id, name FROM users WHERE active AND available AND role = 'atendente' AND id <> COALESCE($1, 0)
-     ORDER BY last_assigned_at NULLS FIRST, id LIMIT 1 FOR UPDATE SKIP LOCKED`, [excludeId || null]);
+    `SELECT id, name FROM users WHERE active AND available AND role = 'atendente' AND id <> COALESCE($1, 0) AND ($2::text IS NULL OR team = $2)
+     ORDER BY last_assigned_at NULLS FIRST, id LIMIT 1 FOR UPDATE SKIP LOCKED`, [excludeId || null, team || null]);
   if (!rows[0]) return null;
   await client.query('UPDATE users SET last_assigned_at = now() WHERE id = $1', [rows[0].id]);
   return rows[0];
@@ -63,52 +85,95 @@ const ticketSchema = z.object({
   priority: z.enum(['baixa', 'normal', 'alta', 'urgente']).default('normal'),
   assignee_id: z.number().int().positive().nullable().optional(),
   auto_assign: z.boolean().optional(),
+  first_message: z.string().trim().max(10000).optional(),
 });
+
+const SORTS = {
+  opened_at: 't.opened_at', last_message_at: 'COALESCE(t.last_message_at, t.opened_at)', protocol: 't.protocol', customer_name: 'c.name', subject: 't.subject',
+  status: 't.status', assignee_name: 'u.name', channel: 't.channel', follow_up_at: 't.follow_up_at', response_due_at: RESPONSE_DUE,
+  priority: `CASE t.priority WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END`,
+};
+
+function buildWhere(req) {
+  const params = [];
+  const where = [scopeSql(req.user, params)];
+  const q = req.query;
+  const view = q.view || '';
+  if (view === 'mine') { params.push(req.user.id); where.push(`t.assignee_id = $${params.length} AND t.status = ANY('{aguardando,em_atendimento,aguardando_cliente}')`); }
+  else if (view === 'queue') where.push(`t.status = 'aguardando' AND t.assignee_id IS NULL`);
+  else if (view === 'unanswered') where.push(AWAITING);
+  else if (view === 'waiting_customer') where.push(`t.status = 'aguardando_cliente'`);
+  else if (view === 'closed') where.push(`t.status IN ('resolvido','cancelado')`);
+  else if (view === 'open') where.push(`t.status = ANY('{aguardando,em_atendimento,aguardando_cliente}')`);
+  else if (view === 'overdue') where.push(`${AWAITING} AND COALESCE(t.last_customer_message_at, t.opened_at) + (cs.response_sla_minutes || ' minutes')::interval < now()`);
+  else if (view === 'follow_up_overdue') where.push(`t.follow_up_at IS NOT NULL AND t.follow_up_at < now() AND t.status = ANY('{aguardando,em_atendimento,aguardando_cliente}')`);
+  if (q.status) { const list = String(q.status).split(',').filter((s) => STATUS.includes(s)); if (list.length) { params.push(list); where.push(`t.status = ANY($${params.length}::text[])`); } }
+  else if (q.open === 'true') { params.push(OPEN); where.push(`t.status = ANY($${params.length}::text[])`); }
+  if (q.queue === 'true') where.push(`t.status = 'aguardando'`);
+  if (q.mine === 'true') { params.push(req.user.id); where.push(`t.assignee_id = $${params.length}`); }
+  if (q.assignee_id === 'none') where.push('t.assignee_id IS NULL');
+  else if (q.assignee_id) { params.push(Number(q.assignee_id)); where.push(`t.assignee_id = $${params.length}`); }
+  if (q.priority) { params.push(q.priority); where.push(`t.priority = $${params.length}`); }
+  if (q.channel) { params.push(q.channel); where.push(`t.channel = $${params.length}`); }
+  if (q.customer_id) { params.push(Number(q.customer_id)); where.push(`t.customer_id = $${params.length}`); }
+  if (q.follow_up === 'pending') where.push(`t.follow_up_at IS NOT NULL AND t.status = ANY('{aguardando,em_atendimento,aguardando_cliente}')`);
+  if (q.tag) { params.push(q.tag); where.push(`$${params.length} = ANY(c.tags)`); }
+  if (q.q) { params.push(`%${q.q.trim()}%`); where.push(`(t.protocol ILIKE $${params.length} OR t.subject ILIKE $${params.length} OR c.name ILIKE $${params.length} OR c.phone ILIKE $${params.length} OR c.company ILIKE $${params.length})`); }
+  if (q.from) { params.push(q.from); where.push(`t.opened_at >= $${params.length}::timestamptz`); }
+  if (q.to) { params.push(q.to); where.push(`t.opened_at < ($${params.length}::date + 1)`); }
+  return { params, where };
+}
 
 router.get('/', async (req, res, next) => {
   try {
-    const params = [];
-    const where = [scopeSql(req.user, params)];
+    const { params, where } = buildWhere(req);
     const q = req.query;
-    if (q.status) { const list = String(q.status).split(',').filter((s) => STATUS.includes(s)); if (list.length) { params.push(list); where.push(`t.status = ANY($${params.length}::text[])`); } }
-    else if (q.open === 'true') { params.push(OPEN); where.push(`t.status = ANY($${params.length}::text[])`); }
-    if (q.queue === 'true') where.push(`t.status = 'aguardando'`);
-    if (q.mine === 'true') { params.push(req.user.id); where.push(`t.assignee_id = $${params.length}`); }
-    if (q.assignee_id === 'none') where.push('t.assignee_id IS NULL');
-    else if (q.assignee_id) { params.push(Number(q.assignee_id)); where.push(`t.assignee_id = $${params.length}`); }
-    if (q.priority) { params.push(q.priority); where.push(`t.priority = $${params.length}`); }
-    if (q.channel) { params.push(q.channel); where.push(`t.channel = $${params.length}`); }
-    if (q.customer_id) { params.push(Number(q.customer_id)); where.push(`t.customer_id = $${params.length}`); }
-    if (q.follow_up === 'pending') where.push(`t.follow_up_at IS NOT NULL AND t.status = ANY('{aguardando,em_atendimento,aguardando_cliente}')`);
-    if (q.q) { params.push(`%${q.q.trim()}%`); where.push(`(t.protocol ILIKE $${params.length} OR t.subject ILIKE $${params.length} OR c.name ILIKE $${params.length} OR c.phone ILIKE $${params.length})`); }
-    if (q.from) { params.push(q.from); where.push(`t.opened_at >= $${params.length}::timestamptz`); }
-    if (q.to) { params.push(q.to); where.push(`t.opened_at < ($${params.length}::date + 1)`); }
     const limit = Math.min(Number(q.limit) || 50, 300);
     const page = Math.max(Number(q.page) || 1, 1);
-    const base = `FROM tickets t JOIN customers c ON c.id = t.customer_id LEFT JOIN users u ON u.id = t.assignee_id LEFT JOIN users cb ON cb.id = t.created_by WHERE ${where.join(' AND ')}`;
+    const base = `${FROM} WHERE ${where.join(' AND ')}`;
     const total = (await query(`SELECT count(*)::int AS n ${base}`, params)).rows[0].n;
+    let order = `CASE t.priority WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, t.opened_at ASC`;
+    if (q.sort && SORTS[q.sort]) order = `${SORTS[q.sort]} ${q.dir === 'desc' ? 'DESC NULLS LAST' : 'ASC NULLS LAST'}, t.id DESC`;
+    else if (q.view && !['queue'].includes(q.view)) order = `COALESCE(t.last_message_at, t.opened_at) DESC`;
     params.push(limit, (page - 1) * limit);
-    const { rows } = await query(`${SELECT.replace(/FROM tickets[\s\S]*/, '')} ${base}
-      ORDER BY CASE t.priority WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, t.opened_at ASC
-      LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    const { rows } = await query(`SELECT ${SELECT_COLS} ${base} ORDER BY ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
     res.json({ tickets: rows, total, page, limit });
+  } catch (err) { next(err); }
+});
+
+// Contadores dos filtros da central (fila, meus, sem resposta, aguardando cliente, encerrados, vencidos).
+router.get('/counts', async (req, res, next) => {
+  try {
+    const params = [];
+    const scope = scopeSql(req.user, params);
+    params.push(req.user.id);
+    const me = `$${params.length}`;
+    const { rows } = await query(`SELECT
+        count(*) FILTER (WHERE t.status = 'aguardando' AND t.assignee_id IS NULL)::int AS queue,
+        count(*) FILTER (WHERE t.assignee_id = ${me} AND t.status = ANY('{aguardando,em_atendimento,aguardando_cliente}'))::int AS mine,
+        count(*) FILTER (WHERE ${AWAITING})::int AS unanswered,
+        count(*) FILTER (WHERE ${AWAITING} AND COALESCE(t.last_customer_message_at, t.opened_at) + (cs.response_sla_minutes || ' minutes')::interval < now())::int AS overdue,
+        count(*) FILTER (WHERE t.status = 'aguardando_cliente')::int AS waiting_customer,
+        count(*) FILTER (WHERE t.status = ANY('{aguardando,em_atendimento,aguardando_cliente}'))::int AS open,
+        count(*) FILTER (WHERE t.status IN ('resolvido','cancelado') AND t.closed_at > now() - interval '30 days')::int AS closed,
+        count(*) FILTER (WHERE t.follow_up_at IS NOT NULL AND t.follow_up_at < now() AND t.status = ANY('{aguardando,em_atendimento,aguardando_cliente}'))::int AS follow_up_overdue,
+        COALESCE(sum(t.unread_count) FILTER (WHERE t.assignee_id = ${me} OR t.assignee_id IS NULL), 0)::int AS unread
+      ${FROM} WHERE ${scope}`, params);
+    res.json({ counts: rows[0] });
   } catch (err) { next(err); }
 });
 
 router.get('/export.csv', async (req, res, next) => {
   try {
-    const params = [];
-    const where = [scopeSql(req.user, params)];
-    if (req.query.from) { params.push(req.query.from); where.push(`t.opened_at >= $${params.length}::timestamptz`); }
-    if (req.query.to) { params.push(req.query.to); where.push(`t.opened_at < ($${params.length}::date + 1)`); }
-    const { rows } = await query(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY t.opened_at DESC`, params);
+    const { params, where } = buildWhere(req);
+    const { rows } = await query(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY t.opened_at DESC LIMIT 5000`, params);
     await audit(req, 'tickets_export', 'ticket', null, { count: rows.length });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="atendimentos.csv"');
     res.send(toCsv(rows, [
-      { key: 'protocol', label: 'protocolo' }, { key: 'customer_name', label: 'cliente' }, { key: 'subject', label: 'assunto' }, { key: 'channel', label: 'canal' },
+      { key: 'protocol', label: 'protocolo' }, { key: 'customer_name', label: 'cliente' }, { key: 'customer_phone', label: 'telefone' }, { key: 'subject', label: 'assunto' }, { key: 'channel', label: 'canal' },
       { key: 'priority', label: 'prioridade' }, { label: 'status', get: (r) => STATUS_LABEL[r.status] }, { key: 'assignee_name', label: 'responsavel' },
-      { key: 'opened_at', label: 'abertura' }, { key: 'first_response_at', label: 'primeira_resposta' }, { key: 'closed_at', label: 'encerramento' }, { key: 'follow_up_at', label: 'retorno_agendado' },
+      { key: 'opened_at', label: 'abertura' }, { key: 'first_response_at', label: 'primeira_resposta' }, { key: 'last_message_at', label: 'ultima_mensagem' }, { key: 'closed_at', label: 'encerramento' }, { key: 'follow_up_at', label: 'retorno_agendado' },
     ]));
   } catch (err) { next(err); }
 });
@@ -116,10 +181,17 @@ router.get('/export.csv', async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const t = await loadTicket(req, Number(req.params.id));
-    const events = await query(`SELECT e.*, u.name AS user_name FROM ticket_events e LEFT JOIN users u ON u.id = e.user_id WHERE e.ticket_id = $1 ORDER BY e.created_at ASC, e.id ASC`, [t.id]);
-    const tasks = await query(`SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.ticket_id = $1 ORDER BY t.due_at`, [t.id]);
-    const opps = await query(`SELECT o.id, o.title, o.value, s.name AS stage_name, s.kind AS stage_kind FROM opportunities o JOIN pipeline_stages s ON s.id = o.stage_id WHERE o.ticket_id = $1`, [t.id]);
-    res.json({ ticket: t, events: events.rows, tasks: tasks.rows, opportunities: opps.rows });
+    const [events, tasks, opps, attachments, customer, history] = await Promise.all([
+      query(`SELECT e.*, u.name AS user_name FROM ticket_events e LEFT JOIN users u ON u.id = e.user_id WHERE e.ticket_id = $1 ORDER BY e.created_at ASC, e.id ASC`, [t.id]),
+      query(`SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.ticket_id = $1 ORDER BY t.done_at NULLS FIRST, t.due_at`, [t.id]),
+      query(`SELECT o.id, o.title, o.value, o.stage_id, o.owner_id, o.next_action, o.next_action_at, o.expected_close_date, o.version, o.ticket_id, s.name AS stage_name, s.kind AS stage_kind, s.pipeline_id, u.name AS owner_name
+             FROM opportunities o JOIN pipeline_stages s ON s.id = o.stage_id LEFT JOIN users u ON u.id = o.owner_id WHERE o.customer_id = $1 ORDER BY (s.kind = 'open') DESC, o.updated_at DESC`, [t.customer_id]),
+      query(`SELECT id, event_id, name, mime, size, wa_media_id, created_at FROM ticket_attachments WHERE ticket_id = $1 ORDER BY created_at`, [t.id]),
+      query(`SELECT c.*, u.name AS owner_name FROM customers c LEFT JOIN users u ON u.id = c.owner_id WHERE c.id = $1`, [t.customer_id]),
+      query(`SELECT id, protocol, subject, status, opened_at, closed_at FROM tickets WHERE customer_id = $1 AND id <> $2 ORDER BY opened_at DESC LIMIT 8`, [t.customer_id, t.id]),
+    ]);
+    const custTasks = await query(`SELECT t.id, t.title, t.due_at, t.done_at, t.priority, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.customer_id = $1 AND t.done_at IS NULL AND (t.ticket_id IS NULL OR t.ticket_id <> $2) ORDER BY t.due_at LIMIT 10`, [t.customer_id, t.id]);
+    res.json({ ticket: t, events: events.rows, tasks: tasks.rows, opportunities: opps.rows, attachments: attachments.rows, customer: customer.rows[0], customer_tickets: history.rows, customer_tasks: custTasks.rows });
   } catch (err) { next(err); }
 });
 
@@ -148,6 +220,7 @@ router.post('/', validate(ticketSchema), async (req, res, next) => {
         [protocol, d.customer_id, d.subject, d.description || null, d.channel, d.priority, assigneeId, req.user.id]);
       const t = rows[0];
       await addEvent(client, t.id, req.user.id, 'system', 'Atendimento aberto', { payload: { action: 'created', channel: d.channel } });
+      if (d.first_message) await addEvent(client, t.id, req.user.id, 'interaction', d.first_message, { direction: 'entrada', channel: d.channel, payload: { manual: true } });
       if (assigneeId) {
         await addEvent(client, t.id, req.user.id, 'system', distributed ? 'Distribuído automaticamente (rodízio)' : 'Responsável atribuído', { payload: { action: 'assigned', to: assigneeId, auto: distributed } });
         if (assigneeId !== req.user.id) await notify(assigneeId, 'Novo atendimento atribuído', `${protocol} — ${d.subject}`, `#/atendimentos/${t.id}`, client);
@@ -156,6 +229,7 @@ router.post('/', validate(ticketSchema), async (req, res, next) => {
       return t;
     });
     broadcast('tickets_changed', { id: result.id, action: 'created' });
+    setImmediate(() => automations.trigger('ticket_created', 'ticket', result.id));
     res.status(201).json({ ticket: result, message: `Atendimento ${result.protocol} aberto.` });
   } catch (err) { next(err); }
 });
@@ -204,6 +278,15 @@ router.post('/:id/claim', async (req, res, next) => {
     });
     broadcast('tickets_changed', { id, action: 'claimed' });
     res.json({ ticket: result, message: 'Você assumiu este atendimento.' });
+  } catch (err) { next(err); }
+});
+
+// Marcar mensagens como lidas (zera o contador de não lidas)
+router.post('/:id/read', async (req, res, next) => {
+  try {
+    const t = await loadTicket(req, Number(req.params.id));
+    if (t.unread_count) { await query('UPDATE tickets SET unread_count = 0 WHERE id = $1', [t.id]); broadcast('tickets_changed', { id: t.id, action: 'read' }, [req.user.id]); }
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
@@ -267,10 +350,11 @@ router.post('/:id/status', validate(z.object({
       if (!t.assignee_id && req.data.status !== 'cancelado') throw conflict('Assuma o atendimento antes de alterar o status.');
       const closing = ['resolvido', 'cancelado'].includes(req.data.status);
       const upd = await client.query(
-        `UPDATE tickets SET status = $1, closed_at = CASE WHEN $2::boolean THEN now() ELSE NULL END, version = version + 1, updated_at = now() WHERE id = $3 RETURNING *`,
+        `UPDATE tickets SET status = $1, closed_at = CASE WHEN $2::boolean THEN now() ELSE NULL END, unread_count = CASE WHEN $2::boolean THEN 0 ELSE unread_count END, version = version + 1, updated_at = now() WHERE id = $3 RETURNING *`,
         [req.data.status, closing, id]);
       await addEvent(client, id, req.user.id, 'system', `Status alterado: ${STATUS_LABEL[t.status]} → ${STATUS_LABEL[req.data.status]}${req.data.note ? ` — ${req.data.note}` : ''}`,
         { payload: { action: 'status', from: t.status, to: req.data.status } });
+      if (closing) await client.query(`UPDATE tasks SET done_at = now(), closed_reason = 'Atendimento encerrado', updated_at = now() WHERE ticket_id = $1 AND done_at IS NULL AND kind = 'acompanhamento'`, [id]);
       await audit(req, 'ticket_status', 'ticket', id, { from: t.status, to: req.data.status }, client);
       return upd.rows[0];
     });
@@ -300,15 +384,33 @@ router.post('/:id/reopen', validate(z.object({ note: z.string().max(2000).option
   } catch (err) { next(err); }
 });
 
-// Anotação interna
-router.post('/:id/notes', validate(z.object({ body: z.string().trim().min(1).max(5000) })), async (req, res, next) => {
+const attachmentSchema = z.array(z.object({
+  name: z.string().trim().min(1).max(200), mime: z.string().trim().min(1).max(120), data: z.string().min(1).max(3 * 1024 * 1024),
+})).max(5).optional();
+
+async function saveAttachments(client, ticketId, eventId, userId, list) {
+  const out = [];
+  for (const a of list || []) {
+    const buf = Buffer.from(a.data.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buf.length > 2 * 1024 * 1024) throw badRequest(`Anexo "${a.name}" maior que 2 MB.`);
+    const { rows } = await client.query(`INSERT INTO ticket_attachments (ticket_id, event_id, name, mime, size, data, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, name, mime, size, created_at`,
+      [ticketId, eventId, a.name, a.mime, buf.length, buf, userId]);
+    out.push(rows[0]);
+  }
+  return out;
+}
+
+// Anotação interna (nunca visível ao cliente)
+router.post('/:id/notes', validate(z.object({ body: z.string().trim().min(1).max(5000), attachments: attachmentSchema })), async (req, res, next) => {
   try {
     const t = await loadTicket(req, Number(req.params.id));
     const ev = await tx(async (client) => {
       const e = await addEvent(client, t.id, req.user.id, 'note', req.data.body);
-      await client.query('UPDATE tickets SET updated_at = now() WHERE id = $1', [t.id]);
+      e.attachments = await saveAttachments(client, t.id, e.id, req.user.id, req.data.attachments);
+      if (e.attachments.length) await client.query(`UPDATE ticket_events SET payload = payload || $1::jsonb WHERE id = $2`, [JSON.stringify({ attachments: e.attachments.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size })) }), e.id]);
       return e;
     });
+    broadcast('tickets_changed', { id: t.id, action: 'note' });
     res.status(201).json({ event: ev, message: 'Anotação interna registrada.' });
   } catch (err) { next(err); }
 });
@@ -318,19 +420,44 @@ router.post('/:id/interactions', validate(z.object({
   direction: z.enum(['entrada', 'saida']),
   channel: z.string().trim().min(1).max(60),
   body: z.string().trim().min(1).max(10000),
+  attachments: attachmentSchema,
 })), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const out = await tx(async (client) => {
       const t = await loadTicket(req, id, client);
       if (!isManager(req.user) && t.assignee_id !== req.user.id) throw forbidden('Assuma o atendimento para registrar interações.');
-      const e = await addEvent(client, id, req.user.id, 'interaction', req.data.body, { direction: req.data.direction, channel: req.data.channel });
-      const upd = await client.query(
-        `UPDATE tickets SET first_response_at = CASE WHEN $1 = 'saida' AND first_response_at IS NULL THEN now() ELSE first_response_at END, updated_at = now() WHERE id = $2 RETURNING *`,
-        [req.data.direction, id]);
+      if (!OPEN.includes(t.status)) throw conflict('Atendimento encerrado. Reabra-o para registrar novas interações.');
+      const e = await addEvent(client, id, req.user.id, 'interaction', req.data.body, { direction: req.data.direction, channel: req.data.channel, payload: { manual: true } });
+      e.attachments = await saveAttachments(client, id, e.id, req.user.id, req.data.attachments);
+      if (e.attachments.length) await client.query(`UPDATE ticket_events SET payload = payload || $1::jsonb WHERE id = $2`, [JSON.stringify({ manual: true, attachments: e.attachments.map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size })) }), e.id]);
+      let status = t.status;
+      if (req.data.direction === 'entrada' && t.status === 'aguardando_cliente') {
+        status = 'em_atendimento';
+        await client.query(`UPDATE tickets SET status = 'em_atendimento', version = version + 1 WHERE id = $1`, [id]);
+        await addEvent(client, id, req.user.id, 'system', 'Cliente respondeu: status alterado de Aguardando cliente para Em atendimento', { payload: { action: 'status', from: t.status, to: status } });
+      }
+      const upd = await client.query(`${SELECT} WHERE t.id = $1`, [id]);
       return { event: e, ticket: upd.rows[0] };
     });
+    broadcast('tickets_changed', { id, action: 'message' });
+    if (req.data.direction === 'entrada') setImmediate(async () => { await automations.stopFollowUps('ticket_id = $1', [id], 'Cliente respondeu'); await automations.trigger('ticket_customer_replied', 'ticket', id, { dedupeKey: `reply:${out.event.id}` }); });
     res.status(201).json({ ...out, message: 'Interação registrada.' });
+  } catch (err) { next(err); }
+});
+
+router.get('/:id/attachments/:aid', async (req, res, next) => {
+  try {
+    const t = await loadTicket(req, Number(req.params.id));
+    const a = (await query('SELECT * FROM ticket_attachments WHERE id = $1 AND ticket_id = $2', [Number(req.params.aid), t.id])).rows[0];
+    if (!a) return next(notFound('Anexo não encontrado.'));
+    if (!a.data && a.wa_media_id) {
+      const { mime, buffer } = await require('../lib/whatsapp').fetchMedia(a.wa_media_id);
+      res.setHeader('Content-Type', mime); res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(a.name)}"`); return res.send(buffer);
+    }
+    res.setHeader('Content-Type', a.mime);
+    res.setHeader('Content-Disposition', `${req.query.download ? 'attachment' : 'inline'}; filename="${encodeURIComponent(a.name)}"`);
+    res.send(a.data);
   } catch (err) { next(err); }
 });
 
@@ -344,13 +471,15 @@ router.post('/:id/follow-up', validate(z.object({ at: z.string().datetime({ offs
       const upd = await client.query('UPDATE tickets SET follow_up_at = $1, updated_at = now() WHERE id = $2 RETURNING *', [req.data.at, id]);
       let task = null;
       if (req.data.at) {
+        await client.query(`UPDATE tasks SET done_at = now(), closed_reason = 'Retorno reagendado', updated_at = now() WHERE ticket_id = $1 AND done_at IS NULL AND kind = 'retorno'`, [id]);
         const r = await client.query(
-          `INSERT INTO tasks (title, description, customer_id, ticket_id, assignee_id, due_at, priority, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,'alta',$7) RETURNING *`,
+          `INSERT INTO tasks (title, description, customer_id, ticket_id, assignee_id, due_at, priority, created_by, kind)
+           VALUES ($1,$2,$3,$4,$5,$6,'alta',$7,'retorno') RETURNING *`,
           [`Retorno: ${t.subject} (${t.protocol})`, req.data.note || null, t.customer_id, id, t.assignee_id || req.user.id, req.data.at, req.user.id]);
         task = r.rows[0];
-        await addEvent(client, id, req.user.id, 'system', `Retorno agendado para ${new Date(req.data.at).toLocaleString('pt-BR')}${req.data.note ? ` — ${req.data.note}` : ''}`, { payload: { action: 'follow_up', at: req.data.at } });
+        await addEvent(client, id, req.user.id, 'system', `Retorno agendado para ${new Date(req.data.at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}${req.data.note ? ` — ${req.data.note}` : ''}`, { payload: { action: 'follow_up', at: req.data.at } });
       } else {
+        await client.query(`UPDATE tasks SET done_at = now(), closed_reason = 'Agendamento removido', updated_at = now() WHERE ticket_id = $1 AND done_at IS NULL AND kind = 'retorno'`, [id]);
         await addEvent(client, id, req.user.id, 'system', 'Retorno agendado removido', { payload: { action: 'follow_up_cleared' } });
       }
       return { ticket: upd.rows[0], task };
@@ -385,4 +514,4 @@ router.post('/distribute', requireRole('admin', 'supervisor'), async (req, res, 
   } catch (err) { next(err); }
 });
 
-module.exports = { router, STATUS_LABEL, OPEN };
+module.exports = { router, STATUS_LABEL, OPEN, AWAITING };

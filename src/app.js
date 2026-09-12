@@ -61,6 +61,9 @@ app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
+app.use('/api/quick-replies', require('./routes/quick-replies'));
+app.use('/api/saved-filters', require('./routes/saved-filters'));
+app.use('/api/automations', require('./routes/automations'));
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 

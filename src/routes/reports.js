@@ -105,6 +105,76 @@ router.get('/summary', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+
+// Painel do dia: indicadores que orientam o trabalho, com escopo por perfil.
+router.get('/dashboard', async (req, res, next) => {
+  try {
+    const mgr = isManager(req.user);
+    const me = req.user.id;
+    const AW = require('./tickets').AWAITING;
+    const p = [me];
+    const scope = mgr ? 'TRUE' : '(t.assignee_id = $1 OR t.assignee_id IS NULL)';
+    const t = (await query(`SELECT
+        count(*) FILTER (WHERE t.status = 'aguardando' AND t.assignee_id IS NULL)::int AS queue,
+        count(*) FILTER (WHERE ${AW})::int AS unanswered,
+        count(*) FILTER (WHERE ${AW} AND COALESCE(t.last_customer_message_at, t.opened_at) + (cs.response_sla_minutes || ' minutes')::interval < now())::int AS overdue,
+        count(*) FILTER (WHERE t.follow_up_at IS NOT NULL AND t.follow_up_at < now() AND t.status IN ('aguardando','em_atendimento','aguardando_cliente'))::int AS follow_up_overdue,
+        count(*) FILTER (WHERE t.status IN ('aguardando','em_atendimento','aguardando_cliente'))::int AS open,
+        count(*) FILTER (WHERE t.assignee_id = $1 AND t.status IN ('aguardando','em_atendimento','aguardando_cliente'))::int AS mine_open,
+        count(*) FILTER (WHERE t.assignee_id = $1 AND ${AW})::int AS mine_unanswered,
+        count(*) FILTER (WHERE t.status = 'resolvido' AND t.closed_at::date = (now() AT TIME ZONE 'America/Sao_Paulo')::date ${mgr ? '' : 'AND t.assignee_id = $1'})::int AS resolved_today,
+        count(*) FILTER (WHERE t.opened_at::date = (now() AT TIME ZONE 'America/Sao_Paulo')::date)::int AS opened_today,
+        count(*) FILTER (WHERE t.first_response_at IS NOT NULL AND t.opened_at > now() - interval '30 days')::int AS fr_samples,
+        count(*) FILTER (WHERE t.first_response_at IS NOT NULL AND t.opened_at > now() - interval '30 days' AND t.first_response_at <= t.opened_at + (cs.response_sla_minutes || ' minutes')::interval)::int AS fr_within_sla,
+        avg(EXTRACT(EPOCH FROM (t.first_response_at - t.opened_at))) FILTER (WHERE t.first_response_at IS NOT NULL AND t.opened_at > now() - interval '30 days') AS avg_first_response_s,
+        max(cs.response_sla_minutes) AS sla_minutes
+      FROM tickets t CROSS JOIN company_settings cs WHERE ${scope}`, p)).rows[0];
+    const oScope = mgr ? 'TRUE' : '(o.owner_id = $1 OR o.owner_id IS NULL)';
+    const o = (await query(`SELECT
+        count(*) FILTER (WHERE s.kind = 'open')::int AS open, COALESCE(sum(o.value) FILTER (WHERE s.kind = 'open'),0)::float AS open_value,
+        count(*) FILTER (WHERE s.kind = 'open' AND o.next_action_at IS NULL AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.opportunity_id = o.id AND k.done_at IS NULL))::int AS no_next_action,
+        count(*) FILTER (WHERE s.kind = 'open' AND ((o.next_action_at IS NOT NULL AND o.next_action_at < now()) OR EXISTS (SELECT 1 FROM tasks k WHERE k.opportunity_id = o.id AND k.done_at IS NULL AND k.due_at < now())))::int AS overdue,
+        count(*) FILTER (WHERE s.kind = 'open' AND o.updated_at < now() - (cs.idle_opportunity_days || ' days')::interval)::int AS idle,
+        count(*) FILTER (WHERE s.kind = 'won' AND date_trunc('month', o.closed_at) = date_trunc('month', now()))::int AS won_month,
+        COALESCE(sum(o.value) FILTER (WHERE s.kind = 'won' AND date_trunc('month', o.closed_at) = date_trunc('month', now())),0)::float AS won_month_value,
+        count(*) FILTER (WHERE s.kind = 'lost' AND date_trunc('month', o.closed_at) = date_trunc('month', now()))::int AS lost_month,
+        count(*) FILTER (WHERE s.kind = 'open' AND o.expected_close_date IS NOT NULL AND o.expected_close_date <= (now() + interval '7 days')::date)::int AS closing_week,
+        max(cs.idle_opportunity_days) AS idle_days
+      FROM opportunities o JOIN pipeline_stages s ON s.id = o.stage_id CROSS JOIN company_settings cs WHERE ${oScope}`, mgr ? [] : p)).rows[0];
+    const tk = (await query(`SELECT
+        count(*) FILTER (WHERE done_at IS NULL AND due_at < now())::int AS overdue,
+        count(*) FILTER (WHERE done_at IS NULL AND due_at::date = (now() AT TIME ZONE 'America/Sao_Paulo')::date)::int AS today
+      FROM tasks WHERE ${mgr ? 'TRUE' : 'assignee_id = $1'}`, mgr ? [] : p)).rows[0];
+    const myTasks = (await query(`SELECT t.id, t.title, t.due_at, t.priority, t.kind, t.customer_id, t.ticket_id, t.opportunity_id, c.name AS customer_name, tk.protocol
+      FROM tasks t LEFT JOIN customers c ON c.id = t.customer_id LEFT JOIN tickets tk ON tk.id = t.ticket_id
+      WHERE t.assignee_id = $1 AND t.done_at IS NULL AND (t.due_at IS NULL OR t.due_at < (now() AT TIME ZONE 'America/Sao_Paulo')::date + 2) ORDER BY t.due_at NULLS LAST LIMIT 8`, [me])).rows;
+    const nextContacts = (await query(`SELECT t.id, t.protocol, t.subject, t.follow_up_at, c.name AS customer_name FROM tickets t JOIN customers c ON c.id = t.customer_id
+      WHERE t.follow_up_at IS NOT NULL AND t.status IN ('aguardando','em_atendimento','aguardando_cliente') ${mgr ? '' : 'AND t.assignee_id = $1'} ORDER BY t.follow_up_at LIMIT 8`, mgr ? [] : [me])).rows;
+    let team = [];
+    if (mgr) {
+      team = (await query(`SELECT u.id, u.name, u.available, u.team,
+          count(t.id) FILTER (WHERE t.status IN ('aguardando','em_atendimento','aguardando_cliente'))::int AS open,
+          count(t.id) FILTER (WHERE ${AW})::int AS unanswered,
+          count(t.id) FILTER (WHERE t.status = 'resolvido' AND t.closed_at::date = (now() AT TIME ZONE 'America/Sao_Paulo')::date)::int AS resolved_today,
+          (SELECT count(*)::int FROM tasks k WHERE k.assignee_id = u.id AND k.done_at IS NULL AND k.due_at < now()) AS overdue_tasks
+        FROM users u LEFT JOIN tickets t ON t.assignee_id = u.id WHERE u.active AND u.role = 'atendente' GROUP BY u.id ORDER BY u.name`)).rows;
+    }
+    res.json({
+      role: req.user.role, tickets: t, opportunities: o, tasks: tk, my_tasks: myTasks, next_contacts: nextContacts, team,
+      help: {
+        queue: 'Atendimentos com status "Aguardando atendimento" e sem responsável. Situação atual.',
+        unanswered: 'Atendimentos ativos em que a última mensagem é do cliente (ou ainda não houve resposta). Situação atual.',
+        overdue: `Sem resposta há mais de ${t.sla_minutes} minutos (prazo configurado em Configurações › Empresa).`,
+        follow_up_overdue: 'Atendimentos abertos com retorno agendado para uma data já passada.',
+        no_next_action: 'Oportunidades abertas sem data de próxima ação e sem tarefa pendente.',
+        sla: `Percentual de atendimentos dos últimos 30 dias cuja primeira resposta ocorreu dentro de ${t.sla_minutes} minutos após a abertura.`,
+        won_month: 'Negócios movidos para a etapa "Ganho" no mês atual, pela data de encerramento.',
+        idle: `Oportunidades abertas sem nenhuma atualização há mais de ${o.idle_days} dias.`,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
 // Exportação CSV do relatório de atendimentos por responsável
 router.get('/export.csv', async (req, res, next) => {
   try {

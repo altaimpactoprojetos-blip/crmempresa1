@@ -88,14 +88,19 @@ router.get('/', async (req, res, next) => {
     }
     const limit = Math.min(Number(req.query.limit) || 25, 200);
     const page = Math.max(Number(req.query.page) || 1, 1);
+    if (req.query.no_open_ticket === 'true') where.push(`NOT EXISTS (SELECT 1 FROM tickets t WHERE t.customer_id = c.id AND t.status NOT IN ('resolvido','cancelado'))`);
+    const SORTS = { name: 'lower(c.name)', updated_at: 'c.updated_at', created_at: 'c.created_at', company: 'lower(c.company)', city: 'lower(c.city)', source: 'c.source', owner_name: 'u.name', next_follow_up: 'next_follow_up', open_tickets: 'open_tickets' };
+    const order = req.query.sort && SORTS[req.query.sort] ? `${SORTS[req.query.sort]} ${req.query.dir === 'desc' ? 'DESC NULLS LAST' : 'ASC NULLS LAST'}` : 'c.updated_at DESC';
     const sql = `FROM customers c LEFT JOIN users u ON u.id = c.owner_id WHERE ${where.join(' AND ')}`;
     const total = (await query(`SELECT count(*)::int AS n ${sql}`, params)).rows[0].n;
     params.push(limit, (page - 1) * limit);
     const { rows } = await query(
       `SELECT c.id, c.name, c.phone, c.email, c.company, c.city, c.source, c.tags, c.owner_id, u.name AS owner_name, c.created_at, c.updated_at,
         (SELECT count(*)::int FROM tickets t WHERE t.customer_id = c.id AND t.status NOT IN ('resolvido','cancelado')) AS open_tickets,
-        (SELECT min(t.follow_up_at) FROM tickets t WHERE t.customer_id = c.id AND t.follow_up_at IS NOT NULL AND t.status NOT IN ('resolvido','cancelado')) AS next_follow_up
-       ${sql} ORDER BY c.updated_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+        (SELECT min(t.follow_up_at) FROM tickets t WHERE t.customer_id = c.id AND t.follow_up_at IS NOT NULL AND t.status NOT IN ('resolvido','cancelado')) AS next_follow_up,
+        (SELECT max(e.created_at) FROM ticket_events e JOIN tickets t ON t.id = e.ticket_id WHERE t.customer_id = c.id AND e.kind = 'interaction') AS last_contact_at,
+        (SELECT count(*)::int FROM opportunities o JOIN pipeline_stages s ON s.id = o.stage_id WHERE o.customer_id = c.id AND s.kind = 'open') AS open_opportunities
+       ${sql} ORDER BY ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
     res.json({ customers: rows, total, page, limit });
   } catch (err) { next(err); }
 });
@@ -197,16 +202,18 @@ router.get('/:id', async (req, res, next) => {
   try {
     const c = await loadCustomer(req, Number(req.params.id));
     const [tickets, opps, tasks, notes, wa] = await Promise.all([
-      query(`SELECT t.id, t.protocol, t.subject, t.status, t.priority, t.channel, t.assignee_id, u.name AS assignee_name, t.opened_at, t.closed_at, t.follow_up_at
+      query(`SELECT t.id, t.protocol, t.subject, t.status, t.priority, t.channel, t.assignee_id, u.name AS assignee_name, t.opened_at, t.closed_at, t.follow_up_at, t.last_message_at, t.last_message_preview, t.unread_count
              FROM tickets t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.customer_id = $1 ORDER BY t.opened_at DESC`, [c.id]),
-      query(`SELECT o.*, s.name AS stage_name, s.kind AS stage_kind, u.name AS owner_name FROM opportunities o
-             JOIN pipeline_stages s ON s.id = o.stage_id LEFT JOIN users u ON u.id = o.owner_id WHERE o.customer_id = $1 ORDER BY o.created_at DESC`, [c.id]),
+      query(`SELECT o.*, s.name AS stage_name, s.kind AS stage_kind, s.pipeline_id, p.name AS pipeline_name, u.name AS owner_name FROM opportunities o
+             JOIN pipeline_stages s ON s.id = o.stage_id JOIN pipelines p ON p.id = s.pipeline_id LEFT JOIN users u ON u.id = o.owner_id WHERE o.customer_id = $1 ORDER BY (s.kind = 'open') DESC, o.created_at DESC`, [c.id]),
       query(`SELECT t.*, u.name AS assignee_name FROM tasks t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.customer_id = $1 ORDER BY t.done_at NULLS FIRST, t.due_at`, [c.id]),
       query(`SELECT n.*, u.name AS user_name FROM customer_notes n LEFT JOIN users u ON u.id = n.user_id WHERE n.customer_id = $1 ORDER BY n.created_at DESC`, [c.id]),
       query(`SELECT id, direction, body, status, created_at FROM whatsapp_messages WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 50`, [c.id]),
     ]);
+    const timeline = (await query(`SELECT e.id, e.ticket_id, e.kind, e.direction, e.channel, e.body, e.created_at, u.name AS user_name, t.protocol FROM ticket_events e JOIN tickets t ON t.id = e.ticket_id LEFT JOIN users u ON u.id = e.user_id
+      WHERE t.customer_id = $1 AND e.kind IN ('interaction','note') ORDER BY e.created_at DESC LIMIT 40`, [c.id])).rows;
     const duplicates = await findDuplicates(c.phone_digits, c.email ? c.email.toLowerCase() : null, c.id);
-    res.json({ customer: c, tickets: tickets.rows, opportunities: opps.rows, tasks: tasks.rows, notes: notes.rows, whatsapp_messages: wa.rows, duplicates });
+    res.json({ customer: c, tickets: tickets.rows, opportunities: opps.rows, tasks: tasks.rows, notes: notes.rows, whatsapp_messages: wa.rows, timeline, duplicates });
   } catch (err) { next(err); }
 });
 
