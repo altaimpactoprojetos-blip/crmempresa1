@@ -87,6 +87,7 @@ CRM.pages.settings = {
 
   async integracoes(box) {
     const wa = await api('/whatsapp/status'); const smtp = this.data.integrations.smtp;
+    const n8n = await api('/n8n/status');
     box.innerHTML = `<div class="grid cols-2"><div class="card"><div class="card-title"><h3>WhatsApp Business (API oficial)</h3>${wa.connected ? '<span class="badge success">Conectado</span>' : '<span class="badge">Desconectado</span>'}</div>
       <p class="small">${UI.esc(wa.message)}</p>
       ${wa.connected ? `<p class="small">Número (ID): <span class="mono">${UI.esc(wa.phone_number_id)}</span></p>` : ''}
@@ -95,7 +96,45 @@ CRM.pages.settings = {
       <p class="small muted">O botão "Abrir WhatsApp" nas telas de cliente e atendimento funciona sempre, mas apenas abre a conversa no aplicativo — as mensagens não são sincronizadas. Nenhum envio é simulado.</p></div>
       <div class="card"><div class="card-title"><h3>E-mail (SMTP)</h3>${smtp.configured ? '<span class="badge success">Configurado</span>' : '<span class="badge">Não configurado</span>'}</div>
       <p class="small">${smtp.configured ? 'A recuperação de senha envia o link por e-mail.' : 'Sem SMTP, a recuperação de senha registra o link no log do servidor e o administrador pode gerar um link em Configurações › Usuários › Senha.'}</p>
-      <div class="help">Variáveis: <span class="mono">SMTP_HOST</span>, <span class="mono">SMTP_PORT</span>, <span class="mono">SMTP_USER</span>, <span class="mono">SMTP_PASS</span>, <span class="mono">MAIL_FROM</span>.</div></div></div>`;
+      <div class="help">Variáveis: <span class="mono">SMTP_HOST</span>, <span class="mono">SMTP_PORT</span>, <span class="mono">SMTP_USER</span>, <span class="mono">SMTP_PASS</span>, <span class="mono">MAIL_FROM</span>.</div></div></div>
+      <div class="card"><div class="card-title"><h3>n8n (automações)</h3>${n8n.connected ? '<span class="badge success">Conectado</span>' : '<span class="badge">Desconectado</span>'}</div>
+      <p class="small">${UI.esc(n8n.message)}</p>
+      <div class="grid cols-2">
+        <div><h4>Entrada — o n8n grava no CRM ${n8n.inbound.configured ? '<span class="badge success">ativa</span>' : '<span class="badge">inativa</span>'}</h4>
+          <p class="small">No n8n, use um nó <span class="mono">HTTP Request</span> com método <span class="mono">POST</span> para:</p>
+          <p class="small mono">${UI.esc(n8n.inbound.example_url)}</p>
+          <p class="small">Autenticação pelo cabeçalho <span class="mono">${UI.esc(n8n.inbound.auth_header)}</span> com o valor de <span class="mono">N8N_API_KEY</span>. Troque <span class="mono">fornecedores.lista</span> pelo nome do evento do seu fluxo.</p></div>
+        <div><h4>Saída — o CRM avisa o n8n ${n8n.outbound.configured ? '<span class="badge success">ativa</span>' : '<span class="badge">inativa</span>'}</h4>
+          <p class="small">${n8n.outbound.configured ? `Webhook: <span class="mono">${UI.esc(n8n.outbound.url)}</span>` : 'Defina <span class="mono">N8N_WEBHOOK_URL</span> com a URL do nó Webhook do n8n.'}</p>
+          <p class="small">${n8n.outbound.signed ? 'Corpo assinado em <span class="mono">X-CRM-Signature</span> (HMAC-SHA256).' : 'Sem assinatura. Defina <span class="mono">N8N_WEBHOOK_SECRET</span> para assinar os envios.'}</p>
+          ${CRM.isManager() && n8n.outbound.configured ? '<button class="btn" id="n8nTest">Enviar evento de teste</button>' : ''}</div>
+      </div>
+      <div class="help">Variáveis no servidor (.env): <span class="mono">N8N_API_KEY</span>, <span class="mono">N8N_WEBHOOK_URL</span>, <span class="mono">N8N_WEBHOOK_SECRET</span> e <span class="mono">N8N_TIMEOUT_MS</span>. Passo a passo em <span class="mono">docs/N8N.md</span>.</div>
+      ${CRM.isManager() ? '<div class="card-title" style="margin-top:12px"><h4>Últimas trocas</h4><button class="btn secondary" id="n8nReload">Atualizar</button></div><div id="n8nLog"></div>' : ''}</div>`;
+
+    const test = box.querySelector('#n8nTest');
+    const logBox = box.querySelector('#n8nLog');
+    const loadLog = async () => {
+      if (!logBox) return;
+      const r = await api('/n8n/events', { query: { limit: 30 } });
+      logBox.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Quando</th><th>Sentido</th><th>Evento</th><th>Itens</th><th>Situação</th><th>Detalhe</th></tr></thead><tbody>
+        ${r.events.map((e) => `<tr><td class="small nowrap">${UI.fmtDateTime(e.created_at)}</td>
+          <td class="small">${e.direction === 'entrada' ? 'n8n → CRM' : 'CRM → n8n'}</td>
+          <td class="mono small">${UI.esc(e.event)}</td>
+          <td class="small">${e.items == null ? '—' : e.items}</td>
+          <td class="small">${e.status === 'ok' ? '<span class="badge success">ok</span>' : e.status === 'erro' ? '<span class="badge danger">erro</span>' : '<span class="badge">pendente</span>'}</td>
+          <td class="small muted">${UI.esc(e.error || (e.http_status ? 'HTTP ' + e.http_status : '') || (e.user_name ? 'por ' + e.user_name : ''))}</td></tr>`).join('')
+          || '<tr><td colspan="6" class="muted">Nenhuma troca registrada ainda.</td></tr>'}</tbody></table></div>`;
+    };
+    if (test) test.onclick = async () => {
+      test.disabled = true;
+      try { const r = await api('/n8n/test', { method: 'POST', body: {} }); UI.ok(r.message); await loadLog(); }
+      catch (err) { UI.err(err); await loadLog(); }
+      finally { test.disabled = false; }
+    };
+    const reload = box.querySelector('#n8nReload');
+    if (reload) reload.onclick = () => loadLog();
+    await loadLog();
   },
 
   backup(box) {

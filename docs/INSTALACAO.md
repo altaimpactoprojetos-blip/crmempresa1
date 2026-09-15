@@ -29,6 +29,13 @@ cp .env.example .env
 | `NODE_ENV` | produção | `production` |
 | `SMTP_*`, `MAIL_FROM` | não | Envio do e-mail de recuperação de senha |
 | `WHATSAPP_*` | não | Integração com a API oficial do WhatsApp |
+| `N8N_API_KEY` | não | Chave que o n8n envia ao CRM (`X-API-Key`) para gravar dados |
+| `N8N_WEBHOOK_URL` | não | URL do nó Webhook do n8n que recebe eventos do CRM |
+| `N8N_WEBHOOK_SECRET` | não | Assina o corpo enviado ao n8n (`X-CRM-Signature`) |
+| `N8N_TIMEOUT_MS` | não | Espera máxima pela resposta do n8n (padrão 10000) |
+| `N8N_SEARCH_TIMEOUT_MS` | não | Espera da busca de fornecedores (padrão 60000) |
+
+Detalhes da integração com o n8n em [N8N.md](N8N.md).
 
 O arquivo `.env` **não deve ser versionado** (já está no `.gitignore`). Em produção o servidor se recusa a iniciar com o `SESSION_SECRET` de exemplo.
 

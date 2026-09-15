@@ -67,7 +67,7 @@ function renderAuth(view = 'login', param) {
 // ---------- Layout ----------
 const NAV = [
   ['#/', 'Dashboard', 'dashboard'], ['#/clientes', 'Clientes', 'customers'], ['#/atendimentos', 'Atendimentos', 'tickets'],
-  ['#/funil', 'Funil', 'pipeline'], ['#/tarefas', 'Tarefas', 'tasks'], ['#/relatorios', 'Relatórios', 'reports'], ['#/configuracoes', 'Configurações', 'settings'],
+  ['#/funil', 'Funil', 'pipeline'], ['#/fornecedores', 'Fornecedores', 'suppliers'], ['#/tarefas', 'Tarefas', 'tasks'], ['#/relatorios', 'Relatórios', 'reports'], ['#/configuracoes', 'Configurações', 'settings'],
 ];
 
 function renderShell() {
@@ -170,7 +170,7 @@ async function route() {
   }
   if (p0 === 'login' || p0 === 'esqueci-senha' || p0 === 'redefinir-senha') { location.hash = '#/'; return; }
   if (!root.querySelector('#app')) renderShell();
-  const map = { '': 'dashboard', clientes: 'customers', atendimentos: 'tickets', funil: 'pipeline', tarefas: 'tasks', relatorios: 'reports', configuracoes: 'settings', perfil: 'profile' };
+  const map = { '': 'dashboard', clientes: 'customers', atendimentos: 'tickets', funil: 'pipeline', fornecedores: 'suppliers', tarefas: 'tasks', relatorios: 'reports', configuracoes: 'settings', perfil: 'profile' };
   const key = map[p0];
   root.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === `#/${p0}`));
   const content = root.querySelector('#content');

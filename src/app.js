@@ -40,7 +40,9 @@ app.use(session({
 
 // Proteção CSRF simples: requisições mutáveis devem enviar o cabeçalho X-Requested-With (cookie SameSite=Lax complementa).
 app.use('/api', (req, res, next) => {
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.path.startsWith('/whatsapp/webhook')) {
+  // Webhooks de sistemas externos autenticam por assinatura/chave e não enviam o cabeçalho.
+  const externo = req.path.startsWith('/whatsapp/webhook') || req.path.startsWith('/n8n/inbound');
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !externo) {
     if (req.get('X-Requested-With') !== 'fetch') return res.status(403).json({ error: 'Requisição inválida (cabeçalho de proteção ausente).' });
   }
   next();
@@ -61,6 +63,7 @@ app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
+app.use('/api/n8n', require('./routes/n8n'));
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 

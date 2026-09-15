@@ -30,6 +30,7 @@ router.get('/', requireAuth, async (req, res, next) => {
       integrations: {
         smtp: { configured: mailer.configured },
         whatsapp: { configured: config.whatsapp.configured, phone_number_id: config.whatsapp.configured ? config.whatsapp.phoneNumberId : null },
+        n8n: { configured: config.n8n.configured, inbound: config.n8n.inboundConfigured, outbound: config.n8n.outboundConfigured },
       },
     });
   } catch (err) { next(err); }

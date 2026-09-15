@@ -20,7 +20,7 @@ npm run create-admin          # cria o primeiro administrador (interativo)
 npm start                     # http://localhost:3000
 ```
 
-Instruções completas (criação do banco, produção com HTTPS, serviço systemd, SMTP, WhatsApp): **[docs/INSTALACAO.md](docs/INSTALACAO.md)**.
+Instruções completas (criação do banco, produção com HTTPS, serviço systemd, SMTP, WhatsApp, n8n): **[docs/INSTALACAO.md](docs/INSTALACAO.md)**.
 
 ## Perfis de acesso
 
@@ -53,6 +53,17 @@ A fila é atualizada em tempo real entre os usuários (Server-Sent Events) e tod
 
 - O botão **Abrir WhatsApp** apenas abre a conversa no aplicativo (`wa.me`). Ele **não sincroniza mensagens** com o CRM; registre as interações manualmente no atendimento.
 - A integração com a **API oficial (Meta Cloud API)** é opcional. Sem `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID`, ela aparece como *Desconectada* e nenhum envio é simulado. Com credenciais, envios e recebimentos (via webhook) ficam gravados no histórico do cliente/atendimento.
+
+## n8n (automações)
+
+Canal genérico para automações, nos dois sentidos e desligado por padrão:
+
+- **n8n → CRM**: `POST /api/n8n/inbound/:evento` com o cabeçalho `X-API-Key` (`N8N_API_KEY`). Útil, por exemplo, para o n8n trazer a lista de fornecedores usada nas cotações.
+- **CRM → n8n**: o CRM envia eventos ao nó Webhook de `N8N_WEBHOOK_URL`, assinados em `X-CRM-Signature` quando `N8N_WEBHOOK_SECRET` está definido.
+
+A aba **Fornecedores** usa esse canal: a operadora pesquisa por nicho, nome, cidade e bairro, o CRM consulta o fluxo do n8n e mostra a lista devolvida, com botões para abrir o WhatsApp e cadastrar o fornecedor como cliente. Nada é gravado até o cadastro.
+
+Toda troca fica registrada e visível em **Configurações › Integrações › n8n**, com sentido, evento, itens, situação e erro. Passo a passo: **[docs/N8N.md](docs/N8N.md)**.
 
 ## Segurança
 
@@ -91,10 +102,11 @@ src/
   server.js, app.js        # servidor Express, sessões, segurança
   config.js, db.js         # variáveis de ambiente e pool PostgreSQL
   migrations/*.sql         # esquema do banco (aplicado por npm run migrate)
-  routes/                  # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications, whatsapp
+  routes/                  # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications, whatsapp, n8n
   middleware/, lib/        # autenticação/permissões, validação, auditoria, tempo real, e-mail
 public/                    # frontend (SPA sem build): index.html, css/, js/
 scripts/                   # migrate, create-admin, seed-demo, backup.sh, restore.sh
 tests/                     # testes de integração (node:test)
 docs/INSTALACAO.md         # guia detalhado de instalação e operação
+docs/N8N.md                # integração com o n8n (entrada, saída e log)
 ```

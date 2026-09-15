@@ -23,6 +23,15 @@ const config = {
     pass: process.env.SMTP_PASS || '',
     from: process.env.MAIL_FROM || 'CRM <nao-responda@localhost>',
   },
+  n8n: {
+    // Chave que o n8n envia ao CRM (cabeçalho X-API-Key) para gravar dados.
+    apiKey: process.env.N8N_API_KEY || '',
+    // URL do nó Webhook do n8n que recebe os eventos do CRM.
+    webhookUrl: process.env.N8N_WEBHOOK_URL || '',
+    // Segredo opcional: assina o corpo enviado ao n8n (cabeçalho X-CRM-Signature).
+    webhookSecret: process.env.N8N_WEBHOOK_SECRET || '',
+    timeoutMs: Number(process.env.N8N_TIMEOUT_MS || 10000),
+  },
   whatsapp: {
     token: process.env.WHATSAPP_TOKEN || '',
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
@@ -33,6 +42,18 @@ const config = {
 
 config.smtp.configured = Boolean(config.smtp.host);
 config.whatsapp.configured = Boolean(config.whatsapp.token && config.whatsapp.phoneNumberId);
+config.n8n.inboundConfigured = Boolean(config.n8n.apiKey);
+config.n8n.outboundConfigured = Boolean(config.n8n.webhookUrl);
+config.n8n.configured = config.n8n.inboundConfigured || config.n8n.outboundConfigured;
+
+if (config.n8n.apiKey && config.n8n.apiKey.length < 24) {
+  console.error('N8N_API_KEY muito curta (mínimo 24 caracteres). Gere com: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+if (config.n8n.webhookUrl && !/^https?:\/\//.test(config.n8n.webhookUrl)) {
+  console.error('N8N_WEBHOOK_URL inválida: informe a URL completa do nó Webhook do n8n (http:// ou https://).');
+  process.exit(1);
+}
 
 if (!config.databaseUrl) {
   console.error('DATABASE_URL não definido. Copie .env.example para .env e ajuste.');
