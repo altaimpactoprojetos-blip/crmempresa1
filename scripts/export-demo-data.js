@@ -35,7 +35,7 @@ async function main() {
   out.settings.logo_data = out.settings.logo_data || null;
   const dir = path.join(__dirname, '..', 'public', 'demo');
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'demo-data.js'), `// Gerado por scripts/export-demo-data.js em ${out.exported_at}. Dados fictícios.\nwindow.DEMO_DATA = ${JSON.stringify(out)};\n`);
+  fs.writeFileSync(path.join(dir, 'demo-data.js'), `// Gerado por scripts/export-demo-data.js em ${out.exported_at}. Dados fictícios.\nwindow.DEMO_DATA = ${JSON.stringify(out).replace(/\},\{"id"/g, '},\n{"id"')};\n`);
   console.log(`Exportado: ${Object.entries(out).filter(([k]) => Array.isArray(out[k])).map(([k, v]) => `${k}=${v.length}`).join(', ')}`);
   await pool.end();
 }
