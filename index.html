@@ -14,6 +14,8 @@
   header p { margin:0; color:#b8c4d8; max-width:72ch; }
   header .meta { color:#b8c4d8; font-size:13px; }
   header .meta strong { color:#fff; }
+  .cta { display:inline-block; background:var(--primary); color:#fff; text-decoration:none; font-weight:600; padding:.55rem .9rem; border-radius:6px; margin-bottom:.6rem; }
+  .cta:hover { background:#1d4ed8; }
   .notice { background:var(--warn-soft); color:var(--warn); border-bottom:1px solid #ecd9a8; padding:.6rem 1.5rem; font-size:13px; }
   .notice .wrap { max-width:1200px; margin:0 auto; }
   .notice a { color:inherit; font-weight:600; }
@@ -59,9 +61,9 @@
 <header><div class="wrap">
   <div><h1>CRM de Atendimento — telas do sistema</h1>
   <p>Central de conversas, clientes, funil comercial, tarefas, painel do dia, automações e integração com o WhatsApp Business, para equipes de até 10 pessoas. Capturas do sistema em execução com dados fictícios. Clique em uma tela para ampliar e use as setas do teclado para navegar.</p></div>
-  <div class="meta">Perfis: <strong>administrador</strong>, <strong>supervisor</strong>, <strong>atendente</strong><br>Node.js + PostgreSQL · interface em português</div>
+  <div class="meta"><a class="cta" href="demo/">Abrir a demonstração navegável</a><br>Perfis: <strong>administrador</strong>, <strong>supervisor</strong>, <strong>atendente</strong><br>Node.js + PostgreSQL · interface em português</div>
 </div></header>
-<div class="notice"><div class="wrap">Esta página mostra apenas as telas. O sistema real precisa de um servidor Node.js e banco PostgreSQL; código, instalação e relatório de entrega em <a href="https://github.com/altaimpactoprojetos-blip/crmempresa1">altaimpactoprojetos-blip/crmempresa1</a> (branch <code>claude/crm-atendimento-evolution-ls4iqw</code>).</div></div>
+<div class="notice"><div class="wrap">Além das telas, a <a href="demo/">demonstração navegável</a> roda a interface completa no navegador com dados fictícios (senha Demo12345). O sistema real, com vários usuários e WhatsApp, precisa de um servidor Node.js e banco PostgreSQL; código, instalação e relatório de entrega em <a href="https://github.com/altaimpactoprojetos-blip/crmempresa1">altaimpactoprojetos-blip/crmempresa1</a> (branch <code>claude/crm-atendimento-evolution-ls4iqw</code>).</div></div>
 <nav><div class="wrap">
   <a href="#acesso">Acesso</a><a href="#painel">Painel</a><a href="#conversas">Central de conversas</a><a href="#clientes">Clientes</a><a href="#funil">Funil</a><a href="#tarefas">Tarefas</a><a href="#relatorios">Relatórios</a><a href="#configuracoes">Configurações</a><a href="#integracoes">Integrações e automações</a><a href="#atendente">Visão do atendente</a><a href="#celular">Celular</a>
 </div></nav>
