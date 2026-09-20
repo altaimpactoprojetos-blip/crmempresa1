@@ -88,6 +88,11 @@ npm run restore -- backups/crm-20250101-020000.dump   # substitui o banco atual 
 
 Agende no cron (ex.: `0 2 * * * cd /caminho/do/crm && npm run backup >> backups/backup.log 2>&1`) e copie os arquivos para armazenamento externo.
 
+## Online
+
+- **Demonstração navegável (sem servidor):** https://altaimpactoprojetos-blip.github.io/crmempresa1/demo/ — a mesma interface com a API simulada no navegador; os dados são fictícios e ficam salvos apenas no navegador de quem acessa. Gerada por `npm run demo:export && npm run demo:build`.
+- **Uso real pela equipe:** precisa de servidor Node.js + PostgreSQL. Roteiro Supabase + Render em [docs/INSTALACAO.md](docs/INSTALACAO.md#71-colocar-online-nuvem-supabase--render); `render.yaml` e `Dockerfile` incluídos.
+
 ## Modo de demonstração
 
 `npm run seed:demo` cria dados **fictícios** (clientes, atendimentos, oportunidades, tarefas e usuários `*@demo.local` com senha `Demo12345`) e ativa um banner "Modo de demonstração" em todas as telas. Não use em produção; para limpar, recrie o banco ou restaure um backup limpo.

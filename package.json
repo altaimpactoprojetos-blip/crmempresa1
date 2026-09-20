@@ -12,6 +12,8 @@
     "migrate": "node scripts/migrate.js",
     "create-admin": "node scripts/create-admin.js",
     "seed:demo": "node scripts/seed-demo.js",
+    "demo:export": "node scripts/export-demo-data.js",
+    "demo:build": "node scripts/build-static-demo.js",
     "backup": "bash scripts/backup.sh",
     "restore": "bash scripts/restore.sh",
     "test": "node --test --test-concurrency=1 tests/*.test.js"

@@ -133,6 +133,17 @@ sudo systemctl start crm
 
 Para restaurar em outro servidor, crie o banco vazio, configure o `.env` e execute o `restore` — as migrações já estão contidas no dump.
 
+## 7.1 Colocar online (nuvem): Supabase + Render
+
+O sistema precisa de um servidor Node.js e de um PostgreSQL. A combinação mais simples e sem custo inicial:
+
+1. **Banco no Supabase** (gerenciado): crie um projeto e copie a *Connection string* em *Project Settings › Database* (use o **Session pooler**, porta 5432, formato `postgres://postgres.xxx:SENHA@aws-0-REGIAO.pooler.supabase.com:5432/postgres`). Defina `DATABASE_SSL=true`.
+2. **Aplicação no Render** (ou Railway/Fly.io): crie um *Web Service* a partir deste repositório. O arquivo `render.yaml` já descreve o serviço; preencha `DATABASE_URL` e `APP_URL`. O comando de início aplica as migrações e sobe o servidor.
+3. Abra `https://SEU-SERVICO.onrender.com`. Se ainda não houver administrador, execute uma vez no *Shell* do Render: `ADMIN_NAME="Nome" ADMIN_EMAIL=admin@empresa.com ADMIN_PASSWORD='senha-forte' npm run create-admin`.
+4. Para o WhatsApp, cadastre `https://SEU-SERVICO.onrender.com/api/whatsapp/webhook` no painel da Meta (seção 6).
+
+Também há um `Dockerfile` para qualquer hospedagem com contêineres. O GitHub Pages serve apenas a **demonstração estática** (`npm run demo:build`), sem servidor nem banco.
+
 ## 8. Atualizações
 
 ```bash

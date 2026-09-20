@@ -1,0 +1,22 @@
+# Deploy no Render (https://render.com) — serviço web Node.js. O banco fica no Supabase (DATABASE_URL).
+services:
+  - type: web
+    name: crm-atendimento
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run migrate && node src/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_SSL
+        value: "true"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false   # cole a URL de conexão do Supabase (Session pooler, porta 5432)
+      - key: APP_URL
+        sync: false   # https://SEU-SERVICO.onrender.com

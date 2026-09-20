@@ -6,3 +6,4 @@ backups/*.dump
 !backups/.gitkeep
 public/uploads/
 *.log
+dist-demo/

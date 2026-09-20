@@ -267,7 +267,10 @@ UI.textarea = (name, value = '', attrs = '') => `<textarea name="${name}" ${attr
 UI.userOptions = (users, { blank = '— Sem responsável —', filter } = {}) => [['', blank], ...users.filter((u) => u.active !== false && (!filter || filter(u))).map((u) => [u.id, u.name])];
 UI.money = (v) => (v == null || v === '' ? '' : Number(v).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.'));
 
-UI.download = (path) => { const a = document.createElement('a'); a.href = '/api' + path; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); };
+UI.download = async (path) => {
+  if (window.DEMO_STATIC) { try { const r = await api(path); const blob = new Blob([r.csv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = r.filename || 'exportacao.csv'; document.body.appendChild(a); a.click(); a.remove(); } catch (e) { UI.err(e); } return; }
+  const a = document.createElement('a'); a.href = '/api' + path; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
+};
 UI.debounce = (fn, ms = 300) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 UI.readFile = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); });
 UI.fmtBytes = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);

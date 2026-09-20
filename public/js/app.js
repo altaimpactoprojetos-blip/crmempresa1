@@ -58,7 +58,7 @@ function renderAuth(view = 'login', param) {
       <div><h2>Central de atendimento e vendas</h2><p>Conversas, clientes, oportunidades e próximos contatos em um só lugar, para a equipe de atendimento da ${UI.esc(name)}.</p>
       <ul><li>Fila compartilhada com distribuição em rodízio</li><li>Histórico completo por cliente</li><li>Funil comercial e tarefas de retorno</li><li>Indicadores de prazo e resultado</li></ul></div>
       <div class="small" style="color:var(--navy-muted)">Acesso restrito à equipe. Perfis: administrador, supervisor e atendente.</div></div>
-    <div class="auth-form"><div class="auth-card">${CRM.settings && CRM.settings.demo_mode ? '<div class="alert warning small">Ambiente de demonstração com dados fictícios.</div>' : ''}${body}</div></div></div>`;
+    <div class="auth-form"><div class="auth-card">${window.DEMO_STATIC ? '<div class="alert warning small"><span>Demonstração navegável com dados fictícios. Entre com <strong>admin@demo.local</strong>, <strong>supervisor@demo.local</strong> ou <strong>bruno@demo.local</strong> e a senha <strong>Demo12345</strong>.</span></div>' : CRM.settings && CRM.settings.demo_mode ? '<div class="alert warning small">Ambiente de demonstração com dados fictícios.</div>' : ''}${body}</div></div></div>`;
   const form = root.querySelector('#authForm');
   form.onsubmit = async (e) => {
     e.preventDefault(); const btn = form.querySelector('button'); btn.disabled = true;
@@ -90,7 +90,7 @@ function renderShell() {
         <button class="icon-btn menu-toggle" id="menuToggle" aria-label="Menu">${UI.icons.menu}</button>
         <div class="search">${UI.icons.search}<input id="globalSearch" placeholder="Buscar cliente, protocolo, telefone…" autocomplete="off" aria-label="Busca rápida"><div class="search-results" id="searchResults" hidden></div></div>
         <div class="grow"></div>
-        ${CRM.settings.demo_mode ? '<span class="demo-pill" title="Os dados exibidos são fictícios. Desative em Configurações › Empresa."><span class="dot"></span>Demonstração</span>' : ''}
+        ${window.DEMO_STATIC ? '<span class="demo-pill" id="demoPill" title="Demonstração estática: os dados são fictícios e ficam salvos apenas neste navegador. Clique para restaurar os dados iniciais." style="cursor:pointer"><span class="dot"></span>Demonstração</span>' : CRM.settings.demo_mode ? '<span class="demo-pill" title="Os dados exibidos são fictícios. Desative em Configurações › Empresa."><span class="dot"></span>Demonstração</span>' : ''}
         ${CRM.user.role === 'atendente' ? `<label class="avail-toggle" title="Disponível para receber atendimentos na distribuição automática"><span class="dot ${CRM.user.available ? 'on' : 'off'}" id="availDot"></span><input type="checkbox" id="availToggle" ${CRM.user.available ? 'checked' : ''}> Disponível</label>` : ''}
         <button class="icon-btn notif-btn" id="notifBtn" aria-label="Notificações">${UI.icons.bell}<span class="count" id="notifCount" hidden></span></button>
       </header>
@@ -104,6 +104,7 @@ function renderShell() {
   const av = root.querySelector('#availToggle');
   if (av) av.onchange = async () => { try { const r = await api('/auth/me/availability', { method: 'PUT', body: { available: av.checked } }); CRM.user.available = r.available; root.querySelector('#availDot').className = `dot ${r.available ? 'on' : 'off'}`; UI.ok(r.available ? 'Você está disponível para novos atendimentos.' : 'Você está indisponível para distribuição automática.'); } catch (e) { UI.err(e); } };
   root.querySelector('#notifBtn').onclick = toggleNotifications;
+  const dp = root.querySelector('#demoPill'); if (dp) dp.onclick = async () => { if (await UI.confirm('Restaurar os dados iniciais da demonstração? As alterações feitas neste navegador serão descartadas.', { okLabel: 'Restaurar' })) window.DEMO_RESET(); };
   setupSearch();
   refreshBadges();
   connectRealtime();
@@ -136,6 +137,7 @@ async function toggleNotifications() {
 }
 
 function connectRealtime() {
+  if (window.DEMO_STATIC) return; // demonstração estática: sem servidor de eventos
   if (CRM.es) CRM.es.close();
   const es = new EventSource('/api/notifications/stream'); CRM.es = es;
   const refresh = UI.debounce(() => { refreshBadges(); if (CRM.currentPage && CRM.currentPage.onRealtime) CRM.currentPage.onRealtime(); }, 400);
