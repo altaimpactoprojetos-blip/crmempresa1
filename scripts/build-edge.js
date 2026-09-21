@@ -35,6 +35,9 @@ esbuild.build({
   bundle: true, platform: 'node', format: 'esm', target: 'esnext',
   outfile: path.join(outDir, 'bundle.js'),
   plugins: [shims],
+  // O runtime das Edge Functions não permite escrever em process.env; o bundle usa um objeto próprio.
+  define: { 'process.env': '__ENV' },
+  banner: { js: 'var __ENV = (globalThis.__ENV = globalThis.__ENV || {});' },
   logLevel: 'warning',
 }).then(() => {
   const size = fs.statSync(path.join(outDir, 'bundle.js')).size;

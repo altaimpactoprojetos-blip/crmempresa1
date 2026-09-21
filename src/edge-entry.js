@@ -1,6 +1,7 @@
 'use strict';
 // Ponto de entrada quando o CRM roda como Supabase Edge Function (Deno). Empacotado por scripts/build-edge.js.
 // As dependências npm são injetadas em globalThis.__deps pelo index.ts; os arquivos do frontend em globalThis.__STATIC__.
+// No build, `process.env` é substituído por um objeto próprio (o runtime de Edge Functions não permite alterar o ambiente).
 const D = globalThis.Deno;
 const env = (k, d) => (D && D.env.get(k)) || process.env[k] || d;
 const crypto = require('crypto');

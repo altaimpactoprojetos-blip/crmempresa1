@@ -1,3 +1,4 @@
+var __ENV = (globalThis.__ENV = globalThis.__ENV || {});
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -2116,32 +2117,32 @@ var require_config = __commonJS({
     }
     var edge = typeof globalThis.Deno !== "undefined";
     var config = {
-      env: process.env.NODE_ENV || "development",
+      env: __ENV.NODE_ENV || "development",
       edge,
-      basePath: (process.env.BASE_PATH || "").replace(/\/$/, ""),
+      basePath: (__ENV.BASE_PATH || "").replace(/\/$/, ""),
       // caminho visto pelo app (ex.: /crm)
-      publicBase: (process.env.PUBLIC_BASE || process.env.BASE_PATH || "").replace(/\/$/, ""),
+      publicBase: (__ENV.PUBLIC_BASE || __ENV.BASE_PATH || "").replace(/\/$/, ""),
       // caminho visto pelo navegador (ex.: /functions/v1/crm)
-      port: Number(process.env.PORT || 3e3),
-      appUrl: (process.env.APP_URL || `http://localhost:${process.env.PORT || 3e3}`).replace(/\/$/, ""),
-      databaseUrl: process.env.DATABASE_URL || process.env.SUPABASE_DB_URL,
-      databaseSsl: bool(process.env.DATABASE_SSL),
-      sessionSecret: process.env.SESSION_SECRET,
-      sessionHours: Number(process.env.SESSION_HOURS || 12),
-      cookieSecure: bool(process.env.COOKIE_SECURE),
+      port: Number(__ENV.PORT || 3e3),
+      appUrl: (__ENV.APP_URL || `http://localhost:${__ENV.PORT || 3e3}`).replace(/\/$/, ""),
+      databaseUrl: __ENV.DATABASE_URL || __ENV.SUPABASE_DB_URL,
+      databaseSsl: bool(__ENV.DATABASE_SSL),
+      sessionSecret: __ENV.SESSION_SECRET,
+      sessionHours: Number(__ENV.SESSION_HOURS || 12),
+      cookieSecure: bool(__ENV.COOKIE_SECURE),
       smtp: {
-        host: process.env.SMTP_HOST || "",
-        port: Number(process.env.SMTP_PORT || 587),
-        secure: bool(process.env.SMTP_SECURE),
-        user: process.env.SMTP_USER || "",
-        pass: process.env.SMTP_PASS || "",
-        from: process.env.MAIL_FROM || "CRM <nao-responda@localhost>"
+        host: __ENV.SMTP_HOST || "",
+        port: Number(__ENV.SMTP_PORT || 587),
+        secure: bool(__ENV.SMTP_SECURE),
+        user: __ENV.SMTP_USER || "",
+        pass: __ENV.SMTP_PASS || "",
+        from: __ENV.MAIL_FROM || "CRM <nao-responda@localhost>"
       },
       whatsapp: {
-        token: process.env.WHATSAPP_TOKEN || "",
-        phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
-        verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || "",
-        appSecret: process.env.WHATSAPP_APP_SECRET || ""
+        token: __ENV.WHATSAPP_TOKEN || "",
+        phoneNumberId: __ENV.WHATSAPP_PHONE_NUMBER_ID || "",
+        verifyToken: __ENV.WHATSAPP_VERIFY_TOKEN || "",
+        appSecret: __ENV.WHATSAPP_APP_SECRET || ""
       }
     };
     config.smtp.configured = Boolean(config.smtp.host);
@@ -5830,19 +5831,19 @@ var require_migrate = __commonJS({
 var require_edge_entry = __commonJS({
   "src/edge-entry.js"() {
     var D = globalThis.Deno;
-    var env = (k, d) => D && D.env.get(k) || process.env[k] || d;
+    var env = (k, d) => D && D.env.get(k) || __ENV[k] || d;
     var crypto = require_crypto();
-    process.env.NODE_ENV = "production";
-    process.env.DATABASE_URL = env("DATABASE_URL") || env("SUPABASE_DB_URL");
-    process.env.DATABASE_SSL = env("DATABASE_SSL", "true");
-    process.env.COOKIE_SECURE = env("COOKIE_SECURE", "true");
-    process.env.BASE_PATH = env("BASE_PATH", "/crm");
-    process.env.PUBLIC_BASE = env("PUBLIC_BASE", "/functions/v1/crm");
-    process.env.APP_URL = env("APP_URL") || (env("SUPABASE_URL") ? `${env("SUPABASE_URL")}${process.env.PUBLIC_BASE}` : "http://localhost:8000" + process.env.PUBLIC_BASE);
-    process.env.SESSION_SECRET = env("SESSION_SECRET") || crypto.createHash("sha256").update("crm-session:" + (env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY") || "sem-chave")).digest("hex");
+    __ENV.NODE_ENV = "production";
+    __ENV.DATABASE_URL = env("DATABASE_URL") || env("SUPABASE_DB_URL");
+    __ENV.DATABASE_SSL = env("DATABASE_SSL", "true");
+    __ENV.COOKIE_SECURE = env("COOKIE_SECURE", "true");
+    __ENV.BASE_PATH = env("BASE_PATH", "/crm");
+    __ENV.PUBLIC_BASE = env("PUBLIC_BASE", "/functions/v1/crm");
+    __ENV.APP_URL = env("APP_URL") || (env("SUPABASE_URL") ? `${env("SUPABASE_URL")}${__ENV.PUBLIC_BASE}` : "http://localhost:8000" + __ENV.PUBLIC_BASE);
+    __ENV.SESSION_SECRET = env("SESSION_SECRET") || crypto.createHash("sha256").update("crm-session:" + (env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY") || "sem-chave")).digest("hex");
     for (const k of ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_APP_SECRET", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "MAIL_FROM", "SESSION_HOURS"]) {
       const v = env(k);
-      if (v) process.env[k] = v;
+      if (v) __ENV[k] = v;
     }
     globalThis.__STATIC__ = require_static_embed();
     var app = require_app();
@@ -5859,7 +5860,7 @@ var require_edge_entry = __commonJS({
     });
     var migrate = require_migrate();
     migrate(pool).catch((e) => console.error("Migra\xE7\xE3o autom\xE1tica falhou:", e.message));
-    app.listen(8e3, () => console.log("CRM (edge) em execu\xE7\xE3o em", process.env.APP_URL));
+    app.listen(8e3, () => console.log("CRM (edge) em execu\xE7\xE3o em", __ENV.APP_URL));
   }
 });
 export default require_edge_entry();
