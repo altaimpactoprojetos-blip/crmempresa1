@@ -5,7 +5,7 @@ class ApiError extends Error {
 }
 
 async function api(path, { method = 'GET', body, query } = {}) {
-  let url = '/api' + path;
+  let url = (window.API_BASE || '') + '/api' + path;
   if (query) {
     const qs = new URLSearchParams();
     Object.entries(query).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') qs.set(k, v); });

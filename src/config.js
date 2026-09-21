@@ -6,11 +6,15 @@ function bool(v, def = false) {
   return ['1', 'true', 'yes', 'sim'].includes(String(v).toLowerCase());
 }
 
+const edge = typeof globalThis.Deno !== 'undefined';
 const config = {
   env: process.env.NODE_ENV || 'development',
+  edge,
+  basePath: (process.env.BASE_PATH || '').replace(/\/$/, ''),          // caminho visto pelo app (ex.: /crm)
+  publicBase: (process.env.PUBLIC_BASE || process.env.BASE_PATH || '').replace(/\/$/, ''), // caminho visto pelo navegador (ex.: /functions/v1/crm)
   port: Number(process.env.PORT || 3000),
   appUrl: (process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, ''),
-  databaseUrl: process.env.DATABASE_URL,
+  databaseUrl: process.env.DATABASE_URL || process.env.SUPABASE_DB_URL,
   databaseSsl: bool(process.env.DATABASE_SSL),
   sessionSecret: process.env.SESSION_SECRET,
   sessionHours: Number(process.env.SESSION_HOURS || 12),
@@ -34,17 +38,9 @@ const config = {
 config.smtp.configured = Boolean(config.smtp.host);
 config.whatsapp.configured = Boolean(config.whatsapp.token && config.whatsapp.phoneNumberId);
 
-if (!config.databaseUrl) {
-  console.error('DATABASE_URL não definido. Copie .env.example para .env e ajuste.');
-  process.exit(1);
-}
-if (!config.sessionSecret || config.sessionSecret.length < 16) {
-  console.error('SESSION_SECRET ausente ou muito curto (mínimo 16 caracteres).');
-  process.exit(1);
-}
-if (config.env === 'production' && /dev-secret|troque-este-valor/.test(config.sessionSecret)) {
-  console.error('SESSION_SECRET de exemplo em produção. Gere um valor aleatório.');
-  process.exit(1);
-}
+const fatal = (msg) => { console.error(msg); if (edge) throw new Error(msg); process.exit(1); };
+if (!config.databaseUrl) fatal('DATABASE_URL não definido. Copie .env.example para .env e ajuste.');
+if (!config.sessionSecret || config.sessionSecret.length < 16) fatal('SESSION_SECRET ausente ou muito curto (mínimo 16 caracteres).');
+if (config.env === 'production' && /dev-secret|troque-este-valor/.test(config.sessionSecret)) fatal('SESSION_SECRET de exemplo em produção. Gere um valor aleatório.');
 
 module.exports = config;

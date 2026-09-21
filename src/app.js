@@ -67,10 +67,29 @@ app.use('/api/automations', require('./routes/automations'));
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 
-// Frontend estático (SPA)
-const pub = path.join(__dirname, '..', 'public');
-app.use(express.static(pub, { maxAge: config.env === 'production' ? '1h' : 0, etag: true }));
-app.get('*', (_req, res) => res.sendFile(path.join(pub, 'index.html')));
+// Frontend estático (SPA). Em execução embutida (Edge Function) os arquivos vêm de memória (globalThis.__STATIC__).
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json' };
+// Com prefixo, o index recebe <base> e um script externo (a CSP bloqueia scripts inline) que define window.API_BASE.
+const indexHtml = (raw) => (config.publicBase
+  ? raw.replace('<head>', `<head>\n  <base href="${config.publicBase}/">`).replace('<script src="js/api.js">', '<script src="js/base.js"></script>\n  <script src="js/api.js">')
+  : raw);
+const baseJs = `window.API_BASE = ${JSON.stringify(config.publicBase)};`;
+app.get('/js/base.js', (_req, res) => { res.set('Cache-Control', 'no-cache'); res.type('text/javascript; charset=utf-8').send(baseJs); });
+if (globalThis.__STATIC__) {
+  const files = globalThis.__STATIC__;
+  app.get('*', (req, res) => {
+    let p = req.path === '/' ? '/index.html' : req.path;
+    if (!files[p]) p = '/index.html';
+    const body = p === '/index.html' ? indexHtml(files[p]) : files[p];
+    res.set('Cache-Control', p === '/index.html' ? 'no-cache' : 'public, max-age=3600');
+    res.type(MIME[path.extname(p)] || 'application/octet-stream').send(body);
+  });
+} else {
+  const pub = path.join(__dirname, '..', 'public');
+  app.get(['/', '/index.html'], (_req, res) => { res.set('Cache-Control', 'no-cache'); res.type('html').send(indexHtml(require('fs').readFileSync(path.join(pub, 'index.html'), 'utf8'))); });
+  app.use(express.static(pub, { maxAge: config.env === 'production' ? '1h' : 0, etag: true }));
+  app.get('*', (_req, res) => { res.type('html').send(indexHtml(require('fs').readFileSync(path.join(pub, 'index.html'), 'utf8'))); });
+}
 
 // Tratamento de erros
 // eslint-disable-next-line no-unused-vars
@@ -86,4 +105,17 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: 'Erro interno. Tente novamente; se persistir, contate o administrador.' });
 });
 
-module.exports = app;
+// Montagem sob um prefixo (ex.: /crm dentro do Supabase). Sem prefixo, exporta o app diretamente.
+let exported = app;
+if (config.basePath) {
+  exported = express();
+  exported.set('trust proxy', 1);
+  exported.disable('x-powered-by');
+  // Sem barra final o navegador resolveria os caminhos relativos errado: redireciona uma única vez.
+  const bases = [...new Set([config.basePath, config.publicBase].filter(Boolean))];
+  for (const b of bases) {
+    exported.get(b, (req, res, next) => (req.originalUrl.split('?')[0].endsWith('/') ? next() : res.redirect(301, `${config.publicBase || b}/`)));
+    exported.use(b, app);
+  }
+}
+module.exports = exported;

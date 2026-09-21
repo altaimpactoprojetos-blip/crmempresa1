@@ -139,7 +139,7 @@ async function toggleNotifications() {
 function connectRealtime() {
   if (window.DEMO_STATIC) return; // demonstração estática: sem servidor de eventos
   if (CRM.es) CRM.es.close();
-  const es = new EventSource('/api/notifications/stream'); CRM.es = es;
+  const es = new EventSource((window.API_BASE || '') + '/api/notifications/stream'); CRM.es = es;
   const refresh = UI.debounce(() => { refreshBadges(); if (CRM.currentPage && CRM.currentPage.onRealtime) CRM.currentPage.onRealtime(); }, 400);
   es.addEventListener('tickets_changed', refresh);
   es.addEventListener('pipeline_changed', refresh);

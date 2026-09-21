@@ -269,7 +269,7 @@ UI.money = (v) => (v == null || v === '' ? '' : Number(v).toFixed(2).replace('.'
 
 UI.download = async (path) => {
   if (window.DEMO_STATIC) { try { const r = await api(path); const blob = new Blob([r.csv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = r.filename || 'exportacao.csv'; document.body.appendChild(a); a.click(); a.remove(); } catch (e) { UI.err(e); } return; }
-  const a = document.createElement('a'); a.href = '/api' + path; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
+  const a = document.createElement('a'); a.href = (window.API_BASE || '') + '/api' + path; a.download = ''; document.body.appendChild(a); a.click(); a.remove();
 };
 UI.debounce = (fn, ms = 300) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 UI.readFile = (file) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); });
