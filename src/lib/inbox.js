@@ -1,9 +1,17 @@
 'use strict';
-// Caixa de entrada: processa o que chega pelo webhook do WhatsApp e mantém as conversas.
+// Caixa de entrada: processa o que chega de cada canal (WhatsApp, Instagram, Messenger) e mantém as conversas.
 // Roda sempre no contexto da empresa dona do canal (runAsCompany).
-const { tx, currentCompanyId } = require('../db');
+const { tx, query, currentCompanyId } = require('../db');
 const { broadcast } = require('./realtime');
 const { normalizePhone, brPhoneVariants } = require('./util');
+const meta = require('./meta');
+
+const CHANNEL_LABEL = {
+  whatsapp: 'WhatsApp',
+  whatsapp_web: 'WhatsApp',
+  messenger: 'Messenger',
+  instagram: 'Instagram',
+};
 
 const MEDIA_TYPES = ['image', 'audio', 'video', 'document', 'sticker'];
 const LABEL = {
@@ -47,10 +55,12 @@ function describe(m) {
 const preview = (type, body) => (body ? String(body).slice(0, 140) : LABEL[type] || 'Mensagem');
 
 // Cria (se preciso) cliente, conversa e oportunidade para um contato novo.
-// phone: dígitos com DDI, ou "lid:<id>" quando o WhatsApp não revela o número (contatos com privacidade).
+// phone: dígitos com DDI; "lid:<id>" quando o WhatsApp não revela o número (contatos com privacidade);
+// "fb:<id>" / "ig:<id>" no Messenger e no Instagram.
 async function openConversation(client, channel, phone, name, jid = null) {
-  const hasNumber = !phone.startsWith('lid:');
-  const fallbackName = hasNumber ? `+${phone}` : 'Contato do WhatsApp';
+  const label = CHANNEL_LABEL[channel.type] || 'WhatsApp';
+  const hasNumber = /^\d+$/.test(phone);
+  const fallbackName = hasNumber ? `+${phone}` : `Contato do ${label}`;
   let customer = hasNumber
     ? (
         await client.query('SELECT id FROM customers WHERE phone_digits = ANY($1) ORDER BY id LIMIT 1', [
@@ -61,8 +71,8 @@ async function openConversation(client, channel, phone, name, jid = null) {
   if (!customer) {
     customer = (
       await client.query(
-        `INSERT INTO customers (name, phone, phone_digits, source) VALUES ($1, $2, $3, 'WhatsApp') RETURNING id`,
-        [name || fallbackName, hasNumber ? `+${phone}` : null, hasNumber ? phone : null],
+        `INSERT INTO customers (name, phone, phone_digits, source) VALUES ($1, $2, $3, $4) RETURNING id`,
+        [name || fallbackName, hasNumber ? `+${phone}` : null, hasNumber ? phone : null, label],
       )
     ).rows[0];
   }
@@ -74,12 +84,12 @@ async function openConversation(client, channel, phone, name, jid = null) {
       [channel.id, customer.id, phone, name || null, jid],
     )
   ).rows[0];
-  if (conv.inserted) conv.newLead = await createLead(client, conv, name || fallbackName);
+  if (conv.inserted) conv.newLead = await createLead(client, conv, name || fallbackName, label);
   return conv;
 }
 
 // Nova conversa vira oportunidade na primeira etapa do funil (como no Kommo), se ativado.
-async function createLead(client, conv, name) {
+async function createLead(client, conv, name, label = 'WhatsApp') {
   const settings = (
     await client.query('SELECT inbox_auto_lead FROM company_settings WHERE company_id = app_company_id()')
   ).rows[0];
@@ -103,15 +113,15 @@ async function createLead(client, conv, name) {
     if (!stage) return null;
     oppId = (
       await client.query(`INSERT INTO opportunities (title, customer_id, stage_id) VALUES ($1, $2, $3) RETURNING id`, [
-        `WhatsApp — ${name}`,
+        `${label} — ${name}`,
         conv.customer_id,
         stage.id,
       ])
     ).rows[0].id;
     await client.query('INSERT INTO opportunity_events (opportunity_id, body, payload) VALUES ($1, $2, $3)', [
       oppId,
-      `Criada automaticamente por uma conversa no WhatsApp, na etapa "${stage.name}"`,
-      JSON.stringify({ action: 'created', via: 'whatsapp', conversation_id: conv.id }),
+      `Criada automaticamente por uma conversa no ${label}, na etapa "${stage.name}"`,
+      JSON.stringify({ action: 'created', via: label.toLowerCase(), conversation_id: conv.id }),
     ]);
     created = { opportunityId: oppId, stageId: stage.id };
   }
@@ -154,13 +164,15 @@ async function ingestMessage(channel, msg) {
       `UPDATE conversations SET last_message_at = $2, last_message_preview = $3, updated_at = now(),
          contact_jid = COALESCE($5::text, contact_jid),
          status = CASE WHEN $6 THEN 'open' ELSE status END,
+         bot_state = CASE WHEN NOT $6 THEN 'done' WHEN status = 'closed' THEN NULL ELSE bot_state END,
+         bot_tries = CASE WHEN $6 AND status = 'closed' THEN 0 ELSE bot_tries END,
          unread_count = CASE WHEN $6 THEN unread_count + 1 ELSE unread_count END,
          last_inbound_at = CASE WHEN $6 THEN $2 ELSE last_inbound_at END,
          contact_name = CASE WHEN $6 THEN COALESCE($4::text, contact_name) ELSE contact_name END
        WHERE id = $1`,
       [conv.id, sentAt, preview(msg.type, msg.body), msg.contactName || null, msg.jid || null, incoming],
     );
-    return { conversationId: conv.id, isNew, newLead: conv.newLead || null };
+    return { conversationId: conv.id, isNew, newLead: conv.newLead || null, incoming };
   });
 }
 
@@ -200,6 +212,8 @@ function announce(result, companyId = currentCompanyId()) {
     // Oportunidade criada pela conversa: roda as automações da etapa (carregado aqui para evitar ciclo)
     require('./automations').onStageEntered({ companyId, ...result.newLead });
   }
+  // Robô de atendimento (boas-vindas, menu, fora do horário)
+  if (result.incoming) require('./chatbot').onInbound({ companyId, conversationId: result.conversationId });
   broadcast(
     'inbox_changed',
     { conversation_id: result.conversationId, new_conversation: result.isNew },
@@ -222,4 +236,73 @@ async function processWebhookValue(channel, value) {
   }
 }
 
-module.exports = { processWebhookValue, ingestMessage, updateStatus, announce, openConversation, preview, describe };
+// ---------- Instagram e Messenger ----------
+
+// Marca como lidas as mensagens enviadas até o instante informado (o Messenger avisa por "watermark").
+async function markReadUntil(channel, contact, watermark) {
+  const { rows } = await query(
+    `UPDATE messages m SET status = 'read' FROM conversations c
+     WHERE c.id = m.conversation_id AND c.channel_id = $1 AND c.contact_phone = $2 AND m.direction = 'out'
+       AND m.status IN ('sent', 'delivered') AND m.created_at <= to_timestamp($3 / 1000.0)
+     RETURNING m.conversation_id`,
+    [channel.id, contact, Number(watermark)],
+  );
+  return rows[0]?.conversation_id || null;
+}
+
+async function processMetaEvent(channel, ev, ownId) {
+  const message = ev.message || (ev.postback ? { mid: ev.postback.mid, text: ev.postback.title } : null);
+  if (message && message.mid && !message.is_deleted) {
+    const echo = Boolean(message.is_echo); // enviada pela própria página (pelo app da Meta ou pelo CRM)
+    if (echo && meta.sentIds.has(message.mid)) return;
+    const other = echo ? ev.recipient?.id : ev.sender?.id;
+    if (!other || String(other) === String(ownId)) return;
+    const phone = meta.contactKey(channel, other);
+    let contactName = null;
+    if (!echo) {
+      const known = await query('SELECT 1 FROM conversations WHERE channel_id = $1 AND contact_phone = $2', [
+        channel.id,
+        phone,
+      ]);
+      if (!known.rowCount) contactName = await meta.profileName(channel, other);
+    }
+    announce(
+      await ingestMessage(channel, {
+        externalId: message.mid,
+        phone,
+        contactName,
+        direction: echo ? 'out' : 'in',
+        ...meta.describe(message),
+        sentAt: ev.timestamp ? new Date(Number(ev.timestamp)) : new Date(),
+      }),
+    );
+  }
+  const touched = new Set();
+  for (const mid of ev.delivery?.mids || []) touched.add(await updateStatus(mid, 'delivered'));
+  if (ev.read?.mid) touched.add(await updateStatus(ev.read.mid, 'read'));
+  else if (ev.read?.watermark && ev.sender?.id)
+    touched.add(await markReadUntil(channel, meta.contactKey(channel, ev.sender.id), ev.read.watermark));
+  for (const id of touched) if (id) broadcast('inbox_changed', { conversation_id: id });
+}
+
+// Corpo do webhook do Messenger (object "page") ou do Instagram (object "instagram").
+async function processMetaWebhook(channel, body) {
+  if (body.object !== (channel.type === 'instagram' ? 'instagram' : 'page')) return;
+  const ownId = channel.type === 'instagram' ? channel.ig_account_id : channel.page_id;
+  for (const entry of body.entry || []) {
+    if (String(entry.id) !== String(ownId)) continue;
+    for (const ev of entry.messaging || []) await processMetaEvent(channel, ev, ownId);
+  }
+}
+
+module.exports = {
+  processMetaWebhook,
+  CHANNEL_LABEL,
+  processWebhookValue,
+  ingestMessage,
+  updateStatus,
+  announce,
+  openConversation,
+  preview,
+  describe,
+};

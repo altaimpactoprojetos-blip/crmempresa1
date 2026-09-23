@@ -10,7 +10,8 @@ CRM.pages.settings = {
       ['funil', 'Funis'],
       ['campos', 'Campos personalizados'],
       ['automacoes', 'Automações'],
-      ['whatsapp', 'WhatsApp'],
+      ['whatsapp', 'WhatsApp e redes'],
+      ['robo', 'Robô de atendimento'],
       ['respostas', 'Respostas rápidas'],
       ['canais', 'Canais e origens'],
       ['integracoes', 'Integrações'],
@@ -620,6 +621,128 @@ CRM.pages.settings = {
     });
   },
 
+  // ---------- Robô de atendimento ----------
+  async robo(box) {
+    const [bot, { channels }, { pipelines }] = await Promise.all([
+      api('/chatbot'),
+      api('/channels'),
+      api('/pipelines'),
+    ]);
+    const ro = !CRM.isAdmin();
+    const cfg = bot.config;
+    const options = cfg.options.map((o) => ({ ...o }));
+    const users = (CRM.users || []).filter((u) => u.active);
+    const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    const dis = ro ? 'disabled' : '';
+    const stageOptions = (sel) =>
+      `<option value="">— Não mudar —</option>${pipelines
+        .map(
+          (p) =>
+            `<optgroup label="${UI.attr(p.name)}">${p.stages
+              .filter((s) => s.active && s.kind === 'open')
+              .map((s) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${UI.esc(s.name)}</option>`)
+              .join('')}</optgroup>`,
+        )
+        .join('')}`;
+    const optionRow = (o, i) => `<div class="action-row card" data-i="${i}">
+      <div class="flex between"><strong>Opção ${i + 1}</strong>${ro ? '' : '<button type="button" class="icon-btn" data-rm title="Remover opção">🗑</button>'}</div>
+      <div class="form-row">${UI.field('', 'Texto da opção', `<input data-k="label" maxlength="60" value="${UI.attr(o.label || '')}" placeholder="ex.: Fazer um pedido" ${dis}>`)}
+        ${UI.field('', 'Resposta do robô', `<input data-k="reply" maxlength="1000" value="${UI.attr(o.reply || '')}" placeholder="ex.: Ótimo! Um vendedor já vai te atender." ${dis}>`)}</div>
+      <div class="form-row cols-3">${UI.field('', 'Encaminhar para', UI.select('assign', [['', '— Fila (qualquer atendente) —'], ['round_robin', 'Rodízio entre atendentes disponíveis'], ...users.map((u) => [u.id, u.name])], o.assign ?? '', `data-k="assign" ${dis}`))}
+        ${UI.field('', 'Mover oportunidade para', `<select data-k="stage_id" ${dis}>${stageOptions(o.stage_id)}</select>`)}
+        ${UI.field('', 'Etiqueta no cliente', `<input data-k="tag" maxlength="40" value="${UI.attr(o.tag || '')}" placeholder="opcional" ${dis}>`)}</div></div>`;
+    const day = (d) => {
+      const span = cfg.hours.days?.[String(d)];
+      return `<tr data-day="${d}"><td><label class="check"><input type="checkbox" data-open ${span ? 'checked' : ''} ${dis}> ${DAYS[d]}</label></td>
+        <td><input type="time" data-start value="${UI.attr(span ? span[0] : '08:00')}" ${dis}></td><td><input type="time" data-end value="${UI.attr(span ? span[1] : '18:00')}" ${dis}></td></tr>`;
+    };
+    box.innerHTML = `<form id="botForm"><div class="card"><div class="flex between wrap"><div><h3>Robô de atendimento</h3>
+        <p class="muted small">Responde na hora quem chama pela primeira vez (ou volta depois de a conversa ser encerrada): dá boas-vindas, mostra um menu e encaminha a conversa. Assim que alguém da equipe responde ou assume a conversa, o robô para.</p></div>
+        <label class="check"><input type="checkbox" name="enabled" ${bot.enabled ? 'checked' : ''} ${dis}> <strong>Robô ativo</strong></label></div>
+      ${UI.field('welcome', 'Mensagem de boas-vindas', `<textarea name="welcome" rows="3" maxlength="1000" ${dis}>${UI.esc(cfg.welcome)}</textarea>`, { hint: 'Variáveis: {nome}, {primeiro_nome}, {empresa}. O menu é adicionado logo abaixo.' })}
+      <h4 class="mt">Menu de opções</h4><p class="muted small">O cliente responde com o número (ou o texto) da opção. Sem opções, o robô só envia as boas-vindas.</p>
+      <div id="optList"></div>${ro ? '' : '<button type="button" class="btn secondary sm" id="addOpt">+ Adicionar opção</button>'}
+      <div class="form-row mt">${UI.field('invalid', 'Quando a resposta não é uma opção', `<textarea name="invalid" rows="2" maxlength="500" ${dis}>${UI.esc(cfg.invalid)}</textarea>`, { hint: 'O menu é repetido abaixo. Na 3ª tentativa, o robô passa para a equipe.' })}
+        ${UI.field('handoff', 'Ao passar para a equipe', `<textarea name="handoff" rows="2" maxlength="500" ${dis}>${UI.esc(cfg.handoff)}</textarea>`)}</div></div>
+      <div class="grid cols-2"><div class="card"><h3>Horário de atendimento</h3>
+        <label class="check"><input type="checkbox" name="hours_enabled" ${cfg.hours.enabled ? 'checked' : ''} ${dis}> Avisar quando a mensagem chegar fora do horário</label>
+        <table class="mt"><tbody>${[1, 2, 3, 4, 5, 6, 0].map(day).join('')}</tbody></table>
+        ${UI.field('away', 'Mensagem fora do horário', `<textarea name="away" rows="2" maxlength="1000" ${dis}>${UI.esc(cfg.hours.away)}</textarea>`, { hint: 'Enviada no máximo uma vez a cada 12 horas por conversa. Fora do horário o menu não é mostrado.' })}</div>
+      <div class="card"><h3>Canais</h3><p class="muted small">Escolha onde o robô atende. Nenhum marcado = todos.</p>
+        ${channels.length ? channels.map((c) => `<label class="check"><input type="checkbox" data-channel="${c.id}" ${cfg.channels.includes(c.id) ? 'checked' : ''} ${dis}> ${UI.esc(c.name)} <span class="muted small">(${UI.esc({ whatsapp: 'WhatsApp', whatsapp_web: 'WhatsApp', instagram: 'Instagram', messenger: 'Messenger' }[c.type])})</span></label>`).join('') : '<p class="muted small">Nenhum canal conectado ainda.</p>'}
+        <h3 class="mt">Como o cliente vê</h3><div class="bot-preview" id="botPreview"></div></div></div>
+      ${ro ? '' : '<div class="flex end"><button class="btn">Salvar robô</button></div>'}</form>`;
+    const form = box.querySelector('#botForm');
+    const list = box.querySelector('#optList');
+    const read = () =>
+      [...list.querySelectorAll('.action-row')].map((row) => {
+        const v = (k) => row.querySelector(`[data-k=${k}]`).value.trim();
+        const assign = v('assign');
+        return {
+          label: v('label'),
+          reply: v('reply'),
+          assign: assign === '' ? null : assign === 'round_robin' ? assign : Number(assign),
+          stage_id: v('stage_id') ? Number(v('stage_id')) : null,
+          tag: v('tag') || null,
+        };
+      });
+    const preview = () => {
+      const opts = read().filter((o) => o.label);
+      const welcome = form.welcome.value
+        .replace(/\{primeiro_nome\}/g, 'Maria')
+        .replace(/\{nome\}/g, 'Maria Silva')
+        .replace(/\{empresa\}/g, this.data.settings.name || '');
+      box.querySelector('#botPreview').textContent = opts.length
+        ? `${welcome}\n\n${opts.map((o, i) => `${i + 1} - ${o.label}`).join('\n')}`
+        : welcome;
+    };
+    const draw = () => {
+      list.innerHTML = options.map(optionRow).join('') || '<p class="muted small">Nenhuma opção.</p>';
+      preview();
+    };
+    draw();
+    form.oninput = preview;
+    if (ro) return;
+    list.onclick = (e) => {
+      if (!e.target.closest('[data-rm]')) return;
+      const i = Number(e.target.closest('.action-row').dataset.i);
+      options.splice(0, options.length, ...read());
+      options.splice(i, 1);
+      draw();
+    };
+    box.querySelector('#addOpt').onclick = () => {
+      options.splice(0, options.length, ...read());
+      if (options.length >= 9) return UI.err(new Error('No máximo 9 opções no menu.'));
+      options.push({ label: '', reply: '', assign: null, stage_id: null, tag: null });
+      draw();
+    };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const days = {};
+      box.querySelectorAll('tr[data-day]').forEach((tr) => {
+        if (tr.querySelector('[data-open]').checked)
+          days[tr.dataset.day] = [tr.querySelector('[data-start]').value, tr.querySelector('[data-end]').value];
+      });
+      const body = {
+        enabled: form.enabled.checked,
+        config: {
+          channels: [...box.querySelectorAll('[data-channel]:checked')].map((x) => Number(x.dataset.channel)),
+          welcome: form.welcome.value.trim(),
+          invalid: form.invalid.value.trim(),
+          handoff: form.handoff.value.trim(),
+          options: read().filter((o) => o.label),
+          hours: { enabled: form.hours_enabled.checked, days, away: form.away.value.trim() },
+        },
+      };
+      try {
+        UI.ok((await api('/chatbot', { method: 'PUT', body })).message);
+      } catch (err) {
+        UI.showErrors(form, err);
+        if (!err.data?.fields) UI.err(err);
+      }
+    };
+  },
+
   canais(box) {
     const s = this.data.settings;
     box.innerHTML = `<div class="grid cols-2"><div class="card"><h3>Canais de atendimento</h3><form id="chForm">${UI.field('channels', 'Um por linha', UI.textarea('channels', s.channels.join('\n'), 'rows="8"'))}<button class="btn">Salvar canais</button></form></div>
@@ -660,7 +783,20 @@ CRM.pages.settings = {
         pending: '<span class="badge warning">Aguardando leitura do QR</span>',
         error: '<span class="badge danger">Erro</span>',
       })[c.status] || '<span class="badge">Desconectado</span>';
-    const kind = (c) => (c.type === 'whatsapp_web' ? 'QR Code (WhatsApp Web)' : 'API oficial (Meta)');
+    const kind = (c) =>
+      ({
+        whatsapp_web: 'WhatsApp · QR Code (WhatsApp Web)',
+        whatsapp: 'WhatsApp · API oficial (Meta)',
+        instagram: 'Instagram Direct',
+        messenger: 'Facebook Messenger',
+      })[c.type];
+    const social = (c) => c.type === 'instagram' || c.type === 'messenger';
+    const socialDetails = (c) => `<h4>Webhook (configure no painel da Meta)</h4>
+      ${UI.field('', 'URL de retorno (Callback URL)', `<input readonly value="${UI.attr(c.webhook_url)}" data-select-all>`)}
+      ${UI.field('', 'Token de verificação (Verify token)', `<input readonly value="${UI.attr(c.verify_token)}" data-select-all>`)}
+      <p class="small muted">No app da Meta, em ${c.type === 'instagram' ? 'Instagram › Webhooks (objeto <em>Instagram</em>)' : 'Messenger › Configurações › Webhooks (objeto <em>Page</em>)'}, cole os dois valores acima e assine <span class="mono">messages</span>, <span class="mono">message_echoes</span>, <span class="mono">message_deliveries</span>, <span class="mono">message_reads</span> e <span class="mono">messaging_postbacks</span>.
+      ${c.has_app_secret ? '' : '<br><strong>Recomendado:</strong> informe a chave secreta do app para o CRM conferir a assinatura de cada mensagem recebida.'}</p>
+      <p class="small muted">ID da página: <span class="mono">${UI.esc(c.page_id)}</span>${c.ig_account_id ? ` · ID do Instagram: <span class="mono">${UI.esc(c.ig_account_id)}</span>` : ''}</p>`;
     const apiDetails = (c) => `<h4>Webhook (configure no painel da Meta)</h4>
       ${UI.field('', 'URL de retorno (Callback URL)', `<input readonly value="${UI.attr(c.webhook_url)}" data-select-all>`)}
       ${UI.field('', 'Token de verificação (Verify token)', `<input readonly value="${UI.attr(c.verify_token)}" data-select-all>`)}
@@ -678,11 +814,16 @@ CRM.pages.settings = {
     const channelCard = (
       c,
     ) => `<div class="card channel-card"><div class="card-title"><div><h3>${UI.esc(c.name)}</h3><div class="muted small">${kind(c)}</div></div>${statusBadge(c)}</div>
-      ${c.display_phone ? `<p><strong>${UI.esc(UI.fmtPhone(c.display_phone))}</strong> ${c.verified_name ? `<span class="muted">· ${UI.esc(c.verified_name)}</span>` : ''}</p>` : ''}
+      ${c.display_phone ? `<p><strong>${UI.esc(social(c) ? c.display_phone : UI.fmtPhone(c.display_phone))}</strong> ${c.verified_name ? `<span class="muted">· ${UI.esc(c.verified_name)}</span>` : ''}</p>` : ''}
       ${c.last_error ? `<div class="alert warning small">${UI.esc(c.last_error)}</div>` : ''}
       ${c.type === 'whatsapp' && CRM.isAdmin() ? apiDetails(c) : ''}
+      ${social(c) && CRM.isAdmin() ? socialDetails(c) : ''}
       <div class="flex">${actions(c)}</div></div>`;
-    const credentialFields = (isNew) => `
+    const credentialFields = (isNew, isSocial = false) =>
+      isSocial
+        ? `${UI.field('access_token', 'Token de acesso da página', UI.input('access_token', '', 'type="password" autocomplete="off"'), { hint: 'Um novo token reconecta o canal.' })}
+      ${UI.field('app_secret', 'Chave secreta do app (App Secret)', UI.input('app_secret', '', 'type="password" autocomplete="off"'))}`
+        : `
       ${isNew ? UI.field('name', 'Nome da conexão', UI.input('name', 'WhatsApp', 'required maxlength="80"'), { required: true, hint: 'Ex.: Vendas, Suporte.' }) : ''}
       ${UI.field('access_token', 'Token de acesso permanente', UI.input('access_token', '', `type="password" ${isNew ? 'required' : ''} autocomplete="off"`), { required: isNew, hint: 'Gerado em Configurações do negócio › Usuários do sistema, com as permissões whatsapp_business_messaging e whatsapp_business_management.' })}
       ${isNew ? UI.field('phone_number_id', 'ID do número de telefone (Phone number ID)', UI.input('phone_number_id', '', 'required inputmode="numeric"'), { required: true }) : ''}
@@ -704,9 +845,54 @@ CRM.pages.settings = {
             <li>Em Configurações do app › Básico, copie a <em>Chave secreta do app</em>.</li>
             <li>Preencha o formulário abaixo. Depois, configure o webhook na Meta com os dados que vão aparecer aqui.</li></ol></details>
           <form id="waForm" class="mt">${credentialFields(true)}<button class="btn">Conectar pela API</button></form></div>
-      </div>`;
+      </div>
+      <div class="card mt"><div class="card-title"><div><h3>Instagram Direct e Facebook Messenger</h3>
+        <p class="small muted">As mensagens do Direct e da página chegam na mesma tela de Conversas, com robô, funil e automações. Fotos e áudios ficam na Meta: o CRM só os mostra quando você abre.</p></div></div>
+        <div class="grid cols-2"><form id="socialForm">
+          ${UI.field(
+            'type',
+            'Rede',
+            UI.select(
+              'type',
+              [
+                ['instagram', 'Instagram Direct'],
+                ['messenger', 'Facebook Messenger'],
+              ],
+              'instagram',
+            ),
+          )}
+          ${UI.field('name', 'Nome da conexão', UI.input('name', 'Instagram', 'required maxlength="80"'), { required: true })}
+          ${UI.field('page_id', 'ID da página do Facebook (Page ID)', UI.input('page_id', '', 'required inputmode="numeric"'), { required: true, hint: 'O Instagram precisa ser uma conta profissional vinculada a esta página.' })}
+          ${UI.field('access_token', 'Token de acesso da página', UI.input('access_token', '', 'type="password" required autocomplete="off"'), { required: true })}
+          ${UI.field('app_secret', 'Chave secreta do app (App Secret)', UI.input('app_secret', '', 'type="password" autocomplete="off"'), { hint: 'Recomendado: protege o webhook contra mensagens falsas.' })}
+          <button class="btn">Conectar</button></form>
+        <details class="help" open><summary>Passo a passo na Meta</summary><ol class="small">
+          <li>No app da Meta (o mesmo do WhatsApp serve), adicione os produtos <em>Messenger</em> e/ou <em>Instagram</em>.</li>
+          <li>Instagram: a conta precisa ser <em>profissional</em> e estar vinculada à página do Facebook da empresa. Ative <em>Permitir acesso às mensagens</em> no app do Instagram (Configurações › Mensagens).</li>
+          <li>Gere um <em>token de acesso da página</em> com as permissões <span class="mono">pages_messaging</span>, <span class="mono">pages_manage_metadata</span> e, para o Instagram, <span class="mono">instagram_basic</span> e <span class="mono">instagram_manage_messages</span>. Use um token de usuário do sistema para ele não expirar.</li>
+          <li>Copie o <em>ID da página</em> (em Sobre › Transparência da página, ou no Meta Business).</li>
+          <li>Conecte aqui e depois configure o webhook com a URL e o token que vão aparecer no cartão da conexão.</li></ol></details></div></div>`;
     const form = box.querySelector('#waForm');
     const clean = (d) => Object.fromEntries(Object.entries(d).filter(([, v]) => v !== '' && v != null));
+    const sf = box.querySelector('#socialForm');
+    sf.type.onchange = () => {
+      if (['Instagram', 'Messenger'].includes(sf.name.value))
+        sf.name.value = sf.type.value === 'instagram' ? 'Instagram' : 'Messenger';
+    };
+    sf.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = sf.querySelector('button');
+      btn.disabled = true;
+      try {
+        const r = await api('/channels/social', { method: 'POST', body: clean(UI.formData(sf)) });
+        UI.ok(r.message);
+        this.whatsapp(box);
+      } catch (err) {
+        UI.showErrors(sf, err);
+      } finally {
+        btn.disabled = false;
+      }
+    };
     form.onsubmit = async (e) => {
       e.preventDefault();
       const btn = form.querySelector('button');
@@ -749,7 +935,7 @@ CRM.pages.settings = {
       if (disc) {
         if (
           !(await UI.confirm(
-            'Desconectar este número? O histórico de conversas é mantido, mas novas mensagens deixam de chegar e de ser enviadas.',
+            'Desconectar esta conexão? O histórico de conversas é mantido, mas novas mensagens deixam de chegar e de ser enviadas.',
             { danger: true, okLabel: 'Desconectar' },
           ))
         )
@@ -764,7 +950,7 @@ CRM.pages.settings = {
       if (edit) {
         const m = UI.modal({
           title: 'Atualizar credenciais',
-          body: `<form id="waEdit">${credentialFields(false)}<p class="small muted">Deixe em branco o que não mudou. Informar um novo token reconecta o canal.</p></form>`,
+          body: `<form id="waEdit">${credentialFields(false, social(channels.find((c) => c.id === Number(edit.dataset.edit))))}<p class="small muted">Deixe em branco o que não mudou. Informar um novo token reconecta o canal.</p></form>`,
           footer:
             '<button class="btn secondary" data-close>Cancelar</button><button class="btn" type="submit" form="waEdit">Salvar</button>',
         });

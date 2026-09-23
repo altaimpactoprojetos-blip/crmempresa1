@@ -12,6 +12,7 @@ const { notify } = require('../lib/notify');
 const { normalizePhone } = require('../lib/util');
 const whatsapp = require('../lib/whatsapp');
 const waweb = require('../lib/waweb');
+const meta = require('../lib/meta');
 const outbox = require('../lib/outbox');
 const { windowInfo } = outbox;
 const { brPhoneVariants } = require('../lib/util');
@@ -108,7 +109,8 @@ router.post(
       if (!phone) return next(badRequest('Cadastre o telefone (com DDD) do cliente para conversar pelo WhatsApp.'));
       const channel = (
         await query(
-          `SELECT * FROM channels WHERE status = 'connected' AND ($1::int IS NULL OR id = $1) ORDER BY created_at LIMIT 1`,
+          `SELECT * FROM channels WHERE status = 'connected' AND type IN ('whatsapp', 'whatsapp_web')
+           AND ($1::int IS NULL OR id = $1) ORDER BY created_at LIMIT 1`,
           [req.data.channel_id || null],
         )
       ).rows[0];
@@ -142,7 +144,7 @@ router.get('/conversations/:id', async (req, res, next) => {
     const { rows } = await query(
       `SELECT * FROM (
          SELECT m.id, m.direction, m.type, m.body, m.media IS NOT NULL AS has_media, m.media->>'mime_type' AS mime_type,
-                m.media->>'filename' AS filename, m.status, m.error, m.created_at, u.name AS sender_name
+                m.media->>'filename' AS filename, m.status, m.error, m.created_at, m.is_bot, u.name AS sender_name
          FROM messages m LEFT JOIN users u ON u.id = m.sender_id
          WHERE m.conversation_id = $1 ORDER BY m.created_at DESC, m.id DESC LIMIT 300) x
        ORDER BY created_at, id`,
@@ -200,8 +202,7 @@ router.get('/conversations/:id/templates', async (req, res, next) => {
   try {
     const c = await loadConversation(req, req.params.id);
     const channel = await loadChannel(c);
-    if (channel.type === 'whatsapp_web')
-      return res.json({ templates: [], waba_configured: false, not_applicable: true });
+    if (channel.type !== 'whatsapp') return res.json({ templates: [], waba_configured: false, not_applicable: true });
     const templates = await whatsapp.listTemplates(channel);
     res.json({
       templates: templates.map((t) => {
@@ -238,7 +239,7 @@ router.post(
     try {
       const c = await loadConversation(req, req.params.id);
       const channel = await loadChannel(c);
-      if (channel.type === 'whatsapp_web')
+      if (channel.type !== 'whatsapp')
         return next(badRequest('Modelos de mensagem só existem na API oficial do WhatsApp.'));
       const d = req.data;
       const id = await sendOutgoing(req, c, {
@@ -288,7 +289,12 @@ router.put(
       }
       await query('UPDATE conversations SET assignee_id = $2, updated_at = now() WHERE id = $1', [c.id, to]);
       if (to && to !== req.user.id)
-        await notify(to, 'Conversa atribuída a você', c.contact_name || `+${c.contact_phone}`, `#/conversas/${c.id}`);
+        await notify(
+          to,
+          'Conversa atribuída a você',
+          c.contact_name || c.customer_name || 'Contato',
+          `#/conversas/${c.id}`,
+        );
       await audit(req, 'conversation_assign', 'conversation', c.id, { from: c.assignee_id, to });
       broadcast('inbox_changed', { conversation_id: c.id });
       res.json({ ok: true, message: to ? 'Responsável atualizado.' : 'Conversa devolvida para a fila.' });
@@ -333,10 +339,10 @@ router.get('/messages/:id/media', async (req, res, next) => {
     if (!m) return next(notFound('Mídia não encontrada.'));
     const c = await loadConversation(req, m.conversation_id);
     const channel = (await query('SELECT * FROM channels WHERE id = $1', [c.channel_id])).rows[0];
-    const file =
-      channel.type === 'whatsapp_web'
-        ? await waweb.fetchMedia(channel, m.media)
-        : await whatsapp.fetchMedia(channel, m.media.id);
+    let file;
+    if (channel.type === 'whatsapp_web') file = await waweb.fetchMedia(channel, m.media);
+    else if (meta.SOCIAL_TYPES.includes(channel.type)) file = await meta.fetchMedia(m.media);
+    else file = await whatsapp.fetchMedia(channel, m.media.id);
     const mime = String(file.mimeType || 'application/octet-stream')
       .split(';')[0]
       .trim();

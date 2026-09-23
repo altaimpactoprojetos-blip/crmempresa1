@@ -76,6 +76,9 @@ Ao criar uma **tabela nova** de dados: inclua `company_id INTEGER NOT NULL DEFAU
 - Mídias nunca são salvas: são buscadas na Meta quando alguém abre. Só formatos seguros abrem no navegador; o resto é baixado como arquivo.
 - **QR Code** (`lib/waweb.js`): uma conexão do WhatsApp Web por canal, no mesmo processo do servidor. Credenciais e chaves ficam em `channel_session_keys` (criptografadas); as conexões ativas são retomadas em `server.js`. Mensagens entram por `inbox.ingestMessage`, o mesmo caminho da API oficial. Nos testes, `waweb.setDriver()` troca a biblioteca por um WhatsApp falso (`tests/qrcode.test.js`).
 
+- **Instagram e Messenger** (`lib/meta.js`): canais `instagram`/`messenger` com `page_id` (e `ig_account_id`). Webhook em `/api/webhooks/meta/<chave>`, processado por `inbox.processMetaWebhook`. O contato é guardado em `contact_phone` como `ig:<id>`/`fb:<id>` (não há telefone). Anexos guardam só a URL da Meta; `meta.fetchMedia` só baixa de domínios da Meta. Nos testes, `tests/metaMock.js` simula a Graph API.
+- **Robô** (`lib/chatbot.js`): `inbox.announce` chama `chatbot.onInbound` para cada mensagem recebida. O estado fica em `conversations.bot_state` (`NULL` → `menu` → `done`) e é decidido dentro de uma transação com `FOR UPDATE` (duas mensagens seguidas não geram duas respostas); o envio acontece depois. Resposta de uma pessoa (`outbox.record` com `senderId`) ou mensagem enviada pelo celular marca `done`; conversa encerrada que recebe mensagem volta para `NULL`.
+
 ## Funis, campos personalizados e automações
 
 - `pipelines` agrupa `pipeline_stages`. Há exatamente um funil `is_default` por empresa (índice único parcial); é nele que `inbox.createLead` cria a oportunidade. Empresas novas ganham o funil padrão em `lib/companies.js`.

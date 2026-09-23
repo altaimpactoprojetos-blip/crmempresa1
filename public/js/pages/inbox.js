@@ -66,13 +66,35 @@ CRM.pages.inbox = {
     if (!box) return;
     box.innerHTML = conversations.length
       ? conversations.map((c) => this.itemHtml(c)).join('')
-      : UI.empty('Nenhuma conversa', f === 'open' ? 'As mensagens recebidas no WhatsApp aparecem aqui.' : '');
+      : UI.empty(
+          'Nenhuma conversa',
+          f === 'open' ? 'As mensagens recebidas no WhatsApp, Instagram e Messenger aparecem aqui.' : '',
+        );
+  },
+
+  CHANNEL_TAG: {
+    whatsapp: ['wa', 'WhatsApp'],
+    whatsapp_web: ['wa', 'WhatsApp'],
+    instagram: ['ig', 'Instagram'],
+    messenger: ['fb', 'Messenger'],
+  },
+
+  // Contato: telefone no WhatsApp; no Instagram/Messenger (ou WhatsApp com privacidade) não há número
+  contactLine(c) {
+    return /^\d+$/.test(c.contact_phone || '')
+      ? UI.fmtPhone(c.contact_phone)
+      : this.CHANNEL_TAG[c.channel_type]?.[1] || '';
+  },
+
+  channelTag(c) {
+    const [cls, label] = this.CHANNEL_TAG[c.channel_type] || ['wa', 'WhatsApp'];
+    return `<span class="ch-tag ${cls}" title="${label}">${cls === 'wa' ? 'WA' : cls === 'ig' ? 'IG' : 'FB'}</span>`;
   },
 
   itemHtml(c) {
-    const name = c.contact_name || c.customer_name || UI.fmtPhone(c.contact_phone);
+    const name = c.contact_name || c.customer_name || this.contactLine(c);
     return `<button class="conv-item ${c.id === this.currentId ? 'active' : ''} ${c.unread_count ? 'unread' : ''}" data-conv="${c.id}">
-      <span class="avatar">${UI.esc(UI.initials(name))}</span>
+      <span class="avatar">${UI.esc(UI.initials(name))}${this.channelTag(c)}</span>
       <span class="conv-main"><span class="conv-top"><strong>${UI.esc(name)}</strong><span class="muted small">${UI.esc(UI.relative(c.last_message_at))}</span></span>
       <span class="conv-bottom"><span class="conv-preview">${UI.esc(c.last_message_preview || '')}</span>${c.unread_count ? `<span class="badge success">${c.unread_count}</span>` : ''}</span>
       <span class="muted small">${c.assignee_name ? UI.esc(c.assignee_name) : 'Sem responsável'}${c.stage_name ? ' · ' + UI.esc(c.stage_name) : ''}</span></span>
@@ -82,9 +104,9 @@ CRM.pages.inbox = {
   renderPlaceholder() {
     const chat = this.el.querySelector('#chat');
     if (!this.channels.length) {
-      chat.innerHTML = `<div class="chat-empty"><h2>Conecte o WhatsApp da empresa</h2>
+      chat.innerHTML = `<div class="chat-empty"><h2>Conecte o WhatsApp ou o Instagram da empresa</h2>
         <p class="muted">Receba e responda as mensagens dos clientes aqui dentro. Cada conversa vira um cliente e uma oportunidade no funil automaticamente.</p>
-        ${CRM.isAdmin() ? '<a class="btn" href="#/configuracoes/whatsapp">Conectar WhatsApp</a>' : '<p class="small">Peça ao administrador para conectar o WhatsApp em Configurações › WhatsApp.</p>'}</div>`;
+        ${CRM.isAdmin() ? '<a class="btn" href="#/configuracoes/whatsapp">Conectar canais</a>' : '<p class="small">Peça ao administrador para conectar os canais em Configurações › WhatsApp e redes.</p>'}</div>`;
     } else
       chat.innerHTML = `<div class="chat-empty">${UI.empty('Selecione uma conversa', 'Escolha uma conversa na lista para ver as mensagens.')}</div>`;
   },
@@ -111,11 +133,11 @@ CRM.pages.inbox = {
     this.conv = data.conversation;
     this.mode = mode || 'message';
     const c = this.conv;
-    const name = c.contact_name || c.customer_name || UI.fmtPhone(c.contact_phone);
+    const name = c.contact_name || c.customer_name || this.contactLine(c);
     chat.innerHTML = `<header class="chat-head">
         <button class="icon-btn chat-back" id="chatBack" aria-label="Voltar">←</button>
         <span class="avatar">${UI.esc(UI.initials(name))}</span>
-        <div class="grow"><strong>${UI.esc(name)}</strong><div class="muted small">${UI.esc(UI.fmtPhone(c.contact_phone))} · ${UI.esc(c.channel_name)}${c.customer_id ? ` · <a href="#/clientes/${c.customer_id}">Ver cliente</a>` : ''}</div></div>
+        <div class="grow"><strong>${UI.esc(name)}</strong><div class="muted small">${UI.esc(this.contactLine(c))} · ${UI.esc(c.channel_name)}${c.customer_id ? ` · <a href="#/clientes/${c.customer_id}">Ver cliente</a>` : ''}</div></div>
         ${this.stageSelect(c)}
         ${this.assignControl(c)}
         ${c.status === 'open' ? '<button class="btn secondary sm" id="closeConv">Encerrar</button>' : '<button class="btn secondary sm" id="reopenConv">Reabrir</button>'}
@@ -158,7 +180,8 @@ CRM.pages.inbox = {
     if (m.type === 'system') return `<div class="msg-system">${UI.esc(m.body)} · ${UI.fmtDateTime(m.created_at)}</div>`;
     const media = m.has_media ? this.mediaHtml(m) : '';
     const body = m.body ? `<div class="msg-text">${UI.esc(m.body)}</div>` : '';
-    const who = m.direction === 'in' ? '' : `${UI.esc(m.sender_name || '')} · `;
+    const who =
+      m.direction === 'in' ? '' : m.is_bot ? '🤖 Robô · ' : m.sender_name ? `${UI.esc(m.sender_name)} · ` : '';
     const status =
       m.direction === 'out'
         ? `<span class="msg-status ${m.status}" title="${UI.attr(m.error || m.status)}">${this.STATUS_ICON[m.status] || ''}</span>`
@@ -179,9 +202,13 @@ CRM.pages.inbox = {
 
   composerHtml(c) {
     const closedWindow = !c.window_open;
+    const social = c.channel_type === 'instagram' || c.channel_type === 'messenger';
+    const windowAlert = social
+      ? `<div class="alert warning small">O cliente não escreve há mais de 7 dias. Pela regra da Meta, só é possível responder quando ele mandar uma nova mensagem no ${this.CHANNEL_TAG[c.channel_type][1]}.</div>`
+      : `<div class="alert warning small">A janela de 24 horas do WhatsApp está fechada: o cliente não escreve há mais de um dia. Envie um modelo aprovado para retomar a conversa. <button class="btn sm" id="sendTemplate">Enviar modelo</button></div>`;
     return `<footer class="composer">
       <div class="composer-tabs"><button data-mode="message" class="${this.mode === 'message' ? 'active' : ''}">Mensagem</button><button data-mode="note" class="${this.mode === 'note' ? 'active' : ''}">Anotação interna</button></div>
-      ${closedWindow && this.mode === 'message' ? `<div class="alert warning small">A janela de 24 horas do WhatsApp está fechada: o cliente não escreve há mais de um dia. Envie um modelo aprovado para retomar a conversa. <button class="btn sm" id="sendTemplate">Enviar modelo</button></div>` : ''}
+      ${closedWindow && this.mode === 'message' ? windowAlert : ''}
       <div class="composer-row ${this.mode === 'note' ? 'note' : ''}">
         <div class="qr-pop" id="qrPop" hidden></div>
         <textarea id="composerText" rows="2" placeholder="${this.mode === 'note' ? 'Anotação visível só para a equipe' : 'Escreva uma mensagem. Digite / para respostas rápidas'}" ${closedWindow && this.mode === 'message' ? 'disabled' : ''}></textarea>

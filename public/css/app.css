@@ -155,9 +155,6 @@ p {
 .flex.between {
   justify-content: space-between;
 }
-.flex.end {
-  justify-content: flex-end;
-}
 .grow {
   flex: 1;
 }
@@ -987,6 +984,12 @@ textarea {
 }
 .tabs button .badge {
   margin-left: 0.3rem;
+}
+/* Em telas largas as abas quebram linha em vez de ficarem escondidas na rolagem */
+@media (min-width: 900px) {
+  .tabs {
+    flex-wrap: wrap;
+  }
 }
 
 /* ---------- Modal ---------- */
@@ -1989,4 +1992,47 @@ td.mono {
 }
 .text-danger {
   color: var(--danger);
+}
+
+/* Selo do canal (WhatsApp, Instagram, Messenger) no avatar da conversa */
+.conv-item .avatar {
+  position: relative;
+}
+.ch-tag {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  border-radius: 9px;
+  border: 2px solid var(--surface, #fff);
+  font-size: 0.55rem;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  color: #fff;
+}
+.ch-tag.wa {
+  background: #22a35a;
+}
+.ch-tag.ig {
+  background: linear-gradient(45deg, #f09433, #dc2743 50%, #bc1888);
+}
+.ch-tag.fb {
+  background: #0866ff;
+}
+
+/* Prévia da mensagem do robô */
+.bot-preview {
+  white-space: pre-wrap;
+  background: #dcf8c6;
+  color: #111;
+  border-radius: 10px 10px 10px 2px;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  max-width: 340px;
+}
+.flex.end {
+  justify-content: flex-end;
 }

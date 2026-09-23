@@ -7,7 +7,8 @@ const { HttpError } = require('./errors');
 
 const GRAPH = () => config.whatsapp.graphUrl;
 
-async function graph(token, path, { method = 'GET', body } = {}) {
+// service: nome usado nas mensagens de erro (a mesma Graph API atende WhatsApp, Messenger e Instagram)
+async function graph(token, path, { method = 'GET', body, service = 'WhatsApp' } = {}) {
   let resp;
   try {
     resp = await fetch(`${GRAPH()}/${path}`, {
@@ -16,12 +17,12 @@ async function graph(token, path, { method = 'GET', body } = {}) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch (err) {
-    throw new HttpError(502, `Não foi possível falar com a API do WhatsApp: ${err.message}`);
+    throw new HttpError(502, `Não foi possível falar com a API do ${service}: ${err.message}`);
   }
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
     const msg = data.error?.error_user_msg || data.error?.message || `erro ${resp.status}`;
-    const err = new HttpError(502, `A API do WhatsApp recusou a operação: ${msg}`);
+    const err = new HttpError(502, `A API do ${service} recusou a operação: ${msg}`);
     err.metaCode = data.error?.code;
     throw err;
   }
@@ -82,4 +83,4 @@ function validSignature(appSecret, rawBody, header) {
   return got.length === expected.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(expected));
 }
 
-module.exports = { getPhoneNumber, sendText, sendTemplate, listTemplates, fetchMedia, validSignature };
+module.exports = { graph, getPhoneNumber, sendText, sendTemplate, listTemplates, fetchMedia, validSignature };

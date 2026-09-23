@@ -2,7 +2,7 @@
 
 CRM de nível intermediário para equipes de atendimento de até ~10 pessoas trabalhando simultaneamente. Interface em português do Brasil, backend próprio em Node.js e banco PostgreSQL.
 
-**Módulos:** Dashboard · Clientes · Atendimentos (fila, protocolo, rodízio) · Funis comerciais (Kanban, vários por empresa) · Campos personalizados · Automações do funil · Tarefas e retornos · Relatórios · Configurações (identidade visual, usuários, funil, integrações, backup, auditoria).
+**Módulos:** Dashboard · Clientes · Atendimentos (fila, protocolo, rodízio) · Conversas (WhatsApp, Instagram Direct e Messenger) · Robô de atendimento · Funis comerciais (Kanban, vários por empresa) · Campos personalizados · Automações do funil · Tarefas e retornos · Relatórios · Configurações (identidade visual, usuários, funil, integrações, backup, auditoria).
 
 ## Requisitos
 
@@ -83,6 +83,16 @@ A conexão por QR usa a biblioteca de código aberto [Baileys](https://github.co
 
 Sem número conectado, nada é enviado nem simulado; o botão do cliente oferece abrir o WhatsApp no aplicativo.
 
+## Instagram Direct e Facebook Messenger
+
+Em **Configurações › WhatsApp e redes**, conecte a página do Facebook (Messenger) e/ou a conta profissional do Instagram vinculada a ela, com o token de acesso da página. As mensagens chegam na mesma tela de **Conversas**, com selo do canal, e seguem as mesmas regras: contato novo vira cliente e oportunidade, robô, automações, respostas rápidas e anotações. Fotos, vídeos e áudios não são salvos: o CRM busca na Meta quando alguém abre.
+
+Regra da Meta: resposta livre até 24h após a última mensagem do cliente; de 24h a 7 dias, a resposta vai como atendimento humano (`HUMAN_AGENT`); depois disso, só quando o cliente escrever de novo.
+
+## Robô de atendimento
+
+Em **Configurações › Robô de atendimento**: mensagem de boas-vindas, menu com até 9 opções (cada uma pode responder, encaminhar para um atendente ou para o rodízio, mudar a etapa da oportunidade e etiquetar o cliente), horário de atendimento com aviso de "fora do horário" e escolha dos canais. O robô atende contatos novos e conversas reabertas; para assim que alguém da equipe responde ou assume a conversa. Mensagens do robô aparecem no chat como "🤖 Robô".
+
 ## Funis, campos personalizados e automações
 
 - **Vários funis** por empresa (ex.: vendas, pós-venda, parcerias), cada um com as suas etapas, em **Configurações › Funis**. O funil **principal** recebe os contatos novos do WhatsApp. No quadro, cada funil vira uma aba.
@@ -141,11 +151,11 @@ src/
   routes/index.js          # registro central das rotas /api
   routes/<módulo>.js       # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications,
                            # inbox (conversas), channels (WhatsApp), quickReplies, webhooks,
-                           # pipelines (funis), customFields, automations
+                           # pipelines (funis), customFields, automations, chatbot
   middleware/              # security, session, csrf, auth, validate, errorHandler
   lib/                     # errors, audit, notify, realtime, mailer, timezone, util, companies,
                            # inbox (mensagens recebidas), outbox (envio), whatsapp (API da Meta), waweb (QR Code),
-                           # crypto, customFields (validação), automations (execução)
+                           # meta (Instagram/Messenger), chatbot, crypto, customFields, automations
 public/                    # frontend (SPA sem build): index.html, css/, js/api.js, js/ui.js, js/pages/, js/app.js
 scripts/                   # migrate, create-admin, seed-demo, backup.sh, restore.sh
 tests/                     # testes de integração (node:test)

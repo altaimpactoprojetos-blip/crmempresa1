@@ -29,6 +29,7 @@ api.use('/notifications', require('./notifications'));
 api.use('/inbox', require('./inbox'));
 api.use('/channels', require('./channels'));
 api.use('/quick-replies', require('./quickReplies'));
+api.use('/chatbot', require('./chatbot'));
 api.use('/webhooks', require('./webhooks'));
 
 module.exports = api;
