@@ -68,6 +68,13 @@ Como isso aparece no código (`src/db.js`):
 
 Ao criar uma **tabela nova** de dados: inclua `company_id INTEGER NOT NULL DEFAULT app_company_id() REFERENCES companies(id) ON DELETE CASCADE`, ative e force RLS com a política `tenant_isolation` (copie o padrão da migração 003), use FKs compostas para tabelas da empresa e escreva um teste em `tests/multiempresa.test.js`.
 
+## Caixa de entrada (WhatsApp)
+
+- `channels`: números conectados por empresa (tokens criptografados com `lib/crypto.js`). Cada canal tem uma URL de webhook própria e secreta (`/api/webhooks/whatsapp/<chave>`), que identifica a empresa antes de qualquer acesso aos dados.
+- `routes/webhooks.js` responde 200 à Meta imediatamente e processa em segundo plano, no contexto da empresa do canal (`lib/inbox.js`). Eventos repetidos são ignorados pelo `wa_message_id`.
+- `lib/whatsapp.js` é o único ponto que fala com a Graph API. Nos testes, `config.whatsapp.graphUrl` aponta para um servidor falso (`tests/inbox.test.js`).
+- Mídias nunca são salvas: são buscadas na Meta quando alguém abre. Só formatos seguros abrem no navegador; o resto é baixado como arquivo.
+
 ## Datas e fuso horário
 
 O servidor e o banco trabalham em UTC (`timestamptz`). Tudo que depende de "dia" — tarefas de hoje, filtros "de/até", relatórios — usa o **fuso configurado pela empresa** (`company_settings.timezone`) por meio de `src/lib/timezone.js`:

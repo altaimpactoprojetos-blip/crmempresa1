@@ -2,7 +2,7 @@
 
 const MUTATING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
 // Rotas chamadas por serviços externos (sem navegador), que se autenticam por assinatura própria.
-const EXEMPT_PATHS = ['/whatsapp/webhook'];
+const EXEMPT_PATHS = ['/webhooks/'];
 
 // Proteção CSRF: requisições mutáveis devem enviar o cabeçalho X-Requested-With: fetch,
 // que um formulário de outro site não consegue definir. O cookie SameSite=Lax complementa.

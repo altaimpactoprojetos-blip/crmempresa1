@@ -59,10 +59,19 @@ A fila é atualizada em tempo real entre os usuários (Server-Sent Events) e tod
 - **Taxa de conversão**: ganhos ÷ (ganhos + perdidos) entre oportunidades encerradas no período.
 - Atendimentos são filtrados pela data de abertura; resolvidos/ganhos/perdidos pela data de encerramento.
 
-## WhatsApp
+## WhatsApp: caixa de entrada (estilo Kommo)
 
-- O botão **Abrir WhatsApp** apenas abre a conversa no aplicativo (`wa.me`). Ele **não sincroniza mensagens** com o CRM; registre as interações manualmente no atendimento.
-- A integração com a **API oficial (Meta Cloud API)** é opcional. Sem `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID`, ela aparece como *Desconectada* e nenhum envio é simulado. Com credenciais, envios e recebimentos (via webhook) ficam gravados no histórico do cliente/atendimento.
+Cada empresa conecta o **próprio número** em **Configurações › WhatsApp**, usando a **API oficial do WhatsApp Business (Meta Cloud API)** — sem risco de bloqueio do número e com a equipe inteira atendendo ao mesmo tempo. A tela traz o passo a passo na Meta e mostra a URL e o token do webhook de cada número.
+
+- **Conversas**: lista à esquerda, chat à direita, em tempo real. Filtros Abertas, Minhas, Sem responsável, Não lidas e Encerradas.
+- **Contato novo vira cliente e oportunidade** na primeira etapa do funil automaticamente (desativável em Configurações › Empresa). Celulares brasileiros sem o 9 extra são ligados ao cliente já cadastrado.
+- **Responsável**: conversas sem responsável ficam numa fila compartilhada; quem responde primeiro assume. Supervisores transferem.
+- **Janela de 24 horas** da Meta: depois de 24h sem mensagem do cliente, o CRM oferece os **modelos aprovados** da conta (com variáveis).
+- **Respostas rápidas** (`/atalho`, com `{nome}`), **anotações internas** (nunca enviadas ao cliente), mudança de etapa do funil e status de entrega (enviada, entregue, lida, falhou).
+- Imagens, áudios, vídeos e documentos recebidos são exibidos no chat, baixados da Meta sob demanda.
+- Segurança: tokens guardados criptografados (`ENCRYPTION_KEY`), URL de webhook secreta por número e verificação da assinatura da Meta (App Secret).
+
+Sem número conectado, nada é enviado nem simulado; o botão do cliente oferece abrir o WhatsApp no aplicativo.
 
 ## Segurança
 
@@ -114,9 +123,11 @@ src/
   config.js, db.js         # variáveis de ambiente e pool PostgreSQL (query/tx)
   migrations/*.sql         # esquema do banco (aplicado por npm run migrate)
   routes/index.js          # registro central das rotas /api
-  routes/<módulo>.js       # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications, whatsapp
+  routes/<módulo>.js       # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications,
+                           # inbox (conversas), channels (WhatsApp), quickReplies, webhooks
   middleware/              # security, session, csrf, auth, validate, errorHandler
-  lib/                     # errors, audit, notify, realtime, mailer, timezone, util
+  lib/                     # errors, audit, notify, realtime, mailer, timezone, util, companies,
+                           # inbox (mensagens recebidas), whatsapp (API da Meta), crypto (segredos)
 public/                    # frontend (SPA sem build): index.html, css/, js/api.js, js/ui.js, js/pages/, js/app.js
 scripts/                   # migrate, create-admin, seed-demo, backup.sh, restore.sh
 tests/                     # testes de integração (node:test)

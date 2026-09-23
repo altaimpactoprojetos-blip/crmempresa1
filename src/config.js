@@ -29,16 +29,14 @@ const config = {
     from: process.env.MAIL_FROM || 'CRM <nao-responda@localhost>',
   },
   whatsapp: {
-    token: process.env.WHATSAPP_TOKEN || '',
-    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
-    verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || '',
-    appSecret: process.env.WHATSAPP_APP_SECRET || '',
-    companyId: Number(process.env.WHATSAPP_COMPANY_ID || 1),
+    // Endereço da API da Meta (alterável só para testes)
+    graphUrl: (process.env.WHATSAPP_GRAPH_URL || 'https://graph.facebook.com/v21.0').replace(/\/$/, ''),
   },
+  // Chave para criptografar tokens de canais salvos no banco
+  encryptionKey: process.env.ENCRYPTION_KEY || process.env.SESSION_SECRET,
 };
 
 config.smtp.configured = Boolean(config.smtp.host);
-config.whatsapp.configured = Boolean(config.whatsapp.token && config.whatsapp.phoneNumberId);
 
 if (!config.databaseUrl) {
   console.error('DATABASE_URL não definido. Copie .env.example para .env e ajuste.');

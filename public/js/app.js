@@ -130,6 +130,7 @@ function renderAuth(view = 'login', param) {
 // ---------- Layout ----------
 const NAV = [
   ['#/', 'Dashboard', 'dashboard'],
+  ['#/conversas', 'Conversas', 'inbox'],
   ['#/clientes', 'Clientes', 'customers'],
   ['#/atendimentos', 'Atendimentos', 'tickets'],
   ['#/funil', 'Funil', 'pipeline'],
@@ -200,11 +201,13 @@ function renderShell() {
 
 async function refreshBadges() {
   try {
-    const [q, t, n] = await Promise.all([
+    const [q, t, n, inbox] = await Promise.all([
       api('/tickets', { query: { queue: 'true', limit: 1 } }),
       api('/tasks', { query: { view: 'overdue' } }),
       api('/notifications'),
+      api('/inbox/summary'),
     ]);
+    setBadge('#/conversas', inbox.unread, 'success');
     setBadge('#/atendimentos', q.total, 'warning');
     setBadge('#/tarefas', t.summary.overdue, 'danger');
     CRM.unread = n.unread;
@@ -276,7 +279,7 @@ function connectRealtime() {
   }, 400);
   es.addEventListener('tickets_changed', refresh);
   es.addEventListener('pipeline_changed', refresh);
-  es.addEventListener('whatsapp_message', refresh);
+  es.addEventListener('inbox_changed', refresh);
   es.addEventListener('settings_changed', async () => {
     CRM.settings = (await api('/settings/public')).settings;
     applyBranding();
@@ -360,6 +363,7 @@ async function route() {
   if (!root.querySelector('#app')) renderShell();
   const map = {
     '': 'dashboard',
+    conversas: 'inbox',
     clientes: 'customers',
     atendimentos: 'tickets',
     funil: 'pipeline',

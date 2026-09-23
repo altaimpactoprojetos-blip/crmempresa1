@@ -350,7 +350,8 @@ router.get('/:id', async (req, res, next) => {
         [c.id],
       ),
       query(
-        `SELECT id, direction, body, status, created_at FROM whatsapp_messages WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 50`,
+        `SELECT id, status, contact_phone, last_message_at, last_message_preview, unread_count FROM conversations
+         WHERE customer_id = $1 ORDER BY last_message_at DESC NULLS LAST`,
         [c.id],
       ),
     ]);
@@ -361,7 +362,7 @@ router.get('/:id', async (req, res, next) => {
       opportunities: opps.rows,
       tasks: tasks.rows,
       notes: notes.rows,
-      whatsapp_messages: wa.rows,
+      conversations: wa.rows,
       duplicates,
     });
   } catch (err) {

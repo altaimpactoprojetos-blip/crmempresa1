@@ -23,6 +23,9 @@ api.use('/opportunities', require('./pipeline'));
 api.use('/tasks', require('./tasks'));
 api.use('/reports', require('./reports'));
 api.use('/notifications', require('./notifications'));
-api.use('/whatsapp', require('./whatsapp'));
+api.use('/inbox', require('./inbox'));
+api.use('/channels', require('./channels'));
+api.use('/quick-replies', require('./quickReplies'));
+api.use('/webhooks', require('./webhooks'));
 
 module.exports = api;

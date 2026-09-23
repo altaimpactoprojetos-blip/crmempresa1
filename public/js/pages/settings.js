@@ -8,12 +8,16 @@ CRM.pages.settings = {
       ['empresa', 'Empresa'],
       ['usuarios', 'Usuários'],
       ['funil', 'Funil'],
+      ['whatsapp', 'WhatsApp'],
+      ['respostas', 'Respostas rápidas'],
       ['canais', 'Canais e origens'],
       ['integracoes', 'Integrações'],
       ['backup', 'Backup'],
       ['auditoria', 'Auditoria'],
     ];
-    const visible = CRM.isAdmin() ? tabs : tabs.filter(([k]) => ['integracoes', 'auditoria', 'funil'].includes(k));
+    const visible = CRM.isAdmin()
+      ? tabs
+      : tabs.filter(([k]) => ['respostas', 'integracoes', 'auditoria', 'funil'].includes(k));
     this.tab = sub && visible.some(([k]) => k === sub) ? sub : visible[0][0];
     el.innerHTML =
       CRM.pageHeader(
@@ -37,6 +41,7 @@ CRM.pages.settings = {
         <div class="form-row">${UI.field('primary_color', 'Cor principal', `<div class="flex"><input type="color" class="color-swatch" id="pc" value="${s.primary_color}"><input name="primary_color" value="${s.primary_color}" pattern="^#[0-9a-fA-F]{6}$"></div>`)}${UI.field('accent_color', 'Cor de destaque', `<div class="flex"><input type="color" class="color-swatch" id="ac" value="${s.accent_color}"><input name="accent_color" value="${s.accent_color}" pattern="^#[0-9a-fA-F]{6}$"></div>`)}</div>
         ${UI.field('timezone', 'Fuso horário', UI.input('timezone', s.timezone), { hint: 'Ex.: America/Sao_Paulo' })}
         <label class="check"><input type="checkbox" name="auto_distribution" ${s.auto_distribution ? 'checked' : ''}> Distribuição automática em rodízio ao abrir atendimentos sem responsável</label>
+        <label class="check mt"><input type="checkbox" name="inbox_auto_lead" ${s.inbox_auto_lead ? 'checked' : ''}> Criar oportunidade no funil automaticamente para cada nova conversa no WhatsApp</label>
         <label class="check mt"><input type="checkbox" name="demo_mode" ${s.demo_mode ? 'checked' : ''}> Modo de demonstração (exibe aviso de dados fictícios)</label></div>
       <div><label>Logotipo</label><img class="logo-preview" id="logoPrev" src="${UI.attr(s.logo_data || '')}" alt="" ${s.logo_data ? '' : 'hidden'}><div class="field mt"><input type="file" id="logoFile" accept="image/png,image/jpeg,image/svg+xml,image/webp"><div class="hint">PNG, JPEG, WEBP ou SVG, até 300KB.</div></div><button type="button" class="btn ghost sm" id="logoClear">Remover logotipo</button></div></div>
       <div class="right mt"><button class="btn">Salvar</button></div></form></div>`;
@@ -270,18 +275,144 @@ CRM.pages.settings = {
     sr.onsubmit = save(sr, 'contact_sources');
   },
 
-  async integracoes(box) {
-    const wa = await api('/whatsapp/status');
+  integracoes(box) {
     const smtp = this.data.integrations.smtp;
-    box.innerHTML = `<div class="grid cols-2"><div class="card"><div class="card-title"><h3>WhatsApp Business (API oficial)</h3>${wa.connected ? '<span class="badge success">Conectado</span>' : '<span class="badge">Desconectado</span>'}</div>
-      <p class="small">${UI.esc(wa.message)}</p>
-      ${wa.connected ? `<p class="small">Número (ID): <span class="mono">${UI.esc(wa.phone_number_id)}</span></p>` : ''}
-      <p class="small">URL do webhook para configurar no painel da Meta: <span class="mono">${UI.esc(wa.webhook_url)}</span></p>
-      <div class="help">Variáveis no servidor (.env): <span class="mono">WHATSAPP_TOKEN</span>, <span class="mono">WHATSAPP_PHONE_NUMBER_ID</span>, <span class="mono">WHATSAPP_VERIFY_TOKEN</span> e <span class="mono">WHATSAPP_APP_SECRET</span>. As credenciais nunca são armazenadas no banco nem exibidas aqui.</div>
-      <p class="small muted">O botão "Abrir WhatsApp" nas telas de cliente e atendimento funciona sempre, mas apenas abre a conversa no aplicativo — as mensagens não são sincronizadas. Nenhum envio é simulado.</p></div>
-      <div class="card"><div class="card-title"><h3>E-mail (SMTP)</h3>${smtp.configured ? '<span class="badge success">Configurado</span>' : '<span class="badge">Não configurado</span>'}</div>
+    box.innerHTML = `<div class="grid cols-2"><div class="card"><div class="card-title"><h3>E-mail (SMTP)</h3>${smtp.configured ? '<span class="badge success">Configurado</span>' : '<span class="badge">Não configurado</span>'}</div>
       <p class="small">${smtp.configured ? 'A recuperação de senha envia o link por e-mail.' : 'Sem SMTP, a recuperação de senha registra o link no log do servidor e o administrador pode gerar um link em Configurações › Usuários › Senha.'}</p>
-      <div class="help">Variáveis: <span class="mono">SMTP_HOST</span>, <span class="mono">SMTP_PORT</span>, <span class="mono">SMTP_USER</span>, <span class="mono">SMTP_PASS</span>, <span class="mono">MAIL_FROM</span>.</div></div></div>`;
+      <div class="help">Configurado no servidor pelo responsável pela plataforma.</div></div>
+      <div class="card"><div class="card-title"><h3>WhatsApp Business</h3></div><p class="small">Conecte o número da empresa em <a href="#/configuracoes/whatsapp">Configurações › WhatsApp</a>.</p></div></div>`;
+  },
+
+  async whatsapp(box) {
+    const { channels } = await api('/channels');
+    const statusBadge = (c) =>
+      c.status === 'connected'
+        ? '<span class="badge success">Conectado</span>'
+        : `<span class="badge ${c.status === 'error' ? 'danger' : ''}">Desconectado</span>`;
+    const channelCard = (
+      c,
+    ) => `<div class="card"><div class="card-title"><h3>${UI.esc(c.name)}</h3>${statusBadge(c)}</div>
+      <p><strong>${UI.esc(c.display_phone || '')}</strong> ${c.verified_name ? `<span class="muted">· ${UI.esc(c.verified_name)}</span>` : ''}</p>
+      ${c.last_error ? `<div class="alert danger small">${UI.esc(c.last_error)}</div>` : ''}
+      <h4>Webhook (configure no painel da Meta)</h4>
+      ${UI.field('', 'URL de retorno (Callback URL)', `<input readonly value="${UI.attr(c.webhook_url)}" data-select-all>`)}
+      ${UI.field('', 'Token de verificação (Verify token)', `<input readonly value="${UI.attr(c.verify_token)}" data-select-all>`)}
+      <p class="small muted">Em WhatsApp › Configuração › Webhook, cole os dois valores acima e assine o campo <span class="mono">messages</span>.
+      ${c.has_app_secret ? '' : '<br><strong>Recomendado:</strong> informe a chave secreta do app para o CRM conferir a assinatura de cada mensagem recebida.'}</p>
+      <p class="small muted">ID do número: <span class="mono">${UI.esc(c.phone_number_id)}</span>${c.waba_id ? ` · ID da conta (WABA): <span class="mono">${UI.esc(c.waba_id)}</span>` : ''}</p>
+      <div class="flex"><button class="btn secondary sm" data-edit="${c.id}">${c.status === 'connected' ? 'Atualizar credenciais' : 'Reconectar'}</button>
+      ${c.status === 'connected' ? `<button class="btn ghost sm" data-disconnect="${c.id}">Desconectar</button>` : ''}</div></div>`;
+    const credentialFields = (isNew) => `
+      ${isNew ? UI.field('name', 'Nome do canal', UI.input('name', 'WhatsApp', 'required maxlength="80"'), { required: true, hint: 'Ex.: Vendas, Suporte.' }) : ''}
+      ${UI.field('access_token', 'Token de acesso permanente', UI.input('access_token', '', `type="password" ${isNew ? 'required' : ''} autocomplete="off"`), { required: isNew, hint: 'Gerado em Configurações do negócio › Usuários do sistema, com as permissões whatsapp_business_messaging e whatsapp_business_management.' })}
+      ${isNew ? UI.field('phone_number_id', 'ID do número de telefone (Phone number ID)', UI.input('phone_number_id', '', 'required inputmode="numeric"'), { required: true }) : ''}
+      ${UI.field('waba_id', 'ID da conta do WhatsApp Business (WABA ID)', UI.input('waba_id', '', 'inputmode="numeric"'), { hint: 'Necessário para listar os modelos de mensagem aprovados.' })}
+      ${UI.field('app_secret', 'Chave secreta do app (App Secret)', UI.input('app_secret', '', 'type="password" autocomplete="off"'), { hint: 'Em Configurações do app › Básico. Protege o webhook contra mensagens falsas.' })}`;
+    box.innerHTML = `${channels.map(channelCard).join('')}
+      <div class="card"><h3>${channels.length ? 'Conectar outro número' : 'Conectar o WhatsApp da empresa'}</h3>
+      <p class="small">Use a <strong>API oficial do WhatsApp Business (Meta)</strong>: sem risco de bloqueio do número e com várias pessoas atendendo ao mesmo tempo.</p>
+      <details class="help"><summary>Passo a passo na Meta</summary><ol class="small">
+        <li>Em <span class="mono">developers.facebook.com</span>, crie um app do tipo <em>Empresa</em> e adicione o produto <em>WhatsApp</em>.</li>
+        <li>Em WhatsApp › Configuração da API, adicione e verifique o número da empresa. Copie o <em>ID do número de telefone</em> e o <em>ID da conta do WhatsApp Business</em>.</li>
+        <li>Em business.facebook.com › Configurações do negócio › Usuários do sistema, crie um usuário administrador, atribua o app e a conta do WhatsApp e gere um <em>token permanente</em>.</li>
+        <li>Em Configurações do app › Básico, copie a <em>Chave secreta do app</em>.</li>
+        <li>Preencha o formulário abaixo. Depois, configure o webhook na Meta com os dados que vão aparecer aqui.</li></ol></details>
+      <form id="waForm" class="mt">${credentialFields(true)}<button class="btn">Conectar</button></form></div>`;
+    const form = box.querySelector('#waForm');
+    const clean = (d) => Object.fromEntries(Object.entries(d).filter(([, v]) => v !== '' && v != null));
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button');
+      btn.disabled = true;
+      try {
+        const r = await api('/channels', { method: 'POST', body: clean(UI.formData(form)) });
+        UI.ok(r.message);
+        this.whatsapp(box);
+      } catch (err) {
+        UI.showErrors(form, err);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+    box.onclick = async (e) => {
+      const edit = e.target.closest('[data-edit]');
+      const disc = e.target.closest('[data-disconnect]');
+      if (disc) {
+        if (
+          !(await UI.confirm(
+            'Desconectar este número? O histórico de conversas é mantido, mas novas mensagens deixam de chegar e de ser enviadas.',
+            { danger: true, okLabel: 'Desconectar' },
+          ))
+        )
+          return;
+        try {
+          UI.ok((await api(`/channels/${disc.dataset.disconnect}/disconnect`, { method: 'POST' })).message);
+          this.whatsapp(box);
+        } catch (err) {
+          UI.err(err);
+        }
+      }
+      if (edit) {
+        const m = UI.modal({
+          title: 'Atualizar credenciais',
+          body: `<form id="waEdit">${credentialFields(false)}<p class="small muted">Deixe em branco o que não mudou. Informar um novo token reconecta o canal.</p></form>`,
+          footer:
+            '<button class="btn secondary" data-close>Cancelar</button><button class="btn" type="submit" form="waEdit">Salvar</button>',
+        });
+        const f = m.el.querySelector('#waEdit');
+        f.onsubmit = async (ev) => {
+          ev.preventDefault();
+          try {
+            const r = await api(`/channels/${edit.dataset.edit}`, { method: 'PUT', body: clean(UI.formData(f)) });
+            UI.ok(r.message);
+            m.close();
+            this.whatsapp(box);
+          } catch (err) {
+            UI.showErrors(f, err);
+          }
+        };
+      }
+    };
+  },
+
+  async respostas(box) {
+    const { quick_replies: list } = await api('/quick-replies');
+    const canEdit = CRM.isManager();
+    box.innerHTML = `<div class="grid cols-2"><div class="card"><h3>Respostas rápidas</h3>
+      <p class="small muted">No chat, digite <span class="mono">/</span> e o atalho para inserir o texto. Use <span class="mono">{nome}</span> para o primeiro nome do cliente.</p>
+      ${list.length ? `<div class="table-wrap"><table><thead><tr><th>Atalho</th><th>Texto</th>${canEdit ? '<th></th>' : ''}</tr></thead><tbody>${list.map((r) => `<tr><td class="mono">/${UI.esc(r.shortcut)}</td><td class="small">${UI.esc(r.body)}</td>${canEdit ? `<td class="nowrap"><button class="btn ghost sm" data-edit="${r.id}">Editar</button><button class="btn ghost sm" data-del="${r.id}">Excluir</button></td>` : ''}</tr>`).join('')}</tbody></table></div>` : UI.empty('Nenhuma resposta rápida', canEdit ? 'Crie a primeira ao lado.' : 'Peça a um supervisor para cadastrar.')}</div>
+      ${canEdit ? `<div class="card"><h3>Nova resposta</h3><form id="qrForm">${UI.field('shortcut', 'Atalho', UI.input('shortcut', '', 'required maxlength="30" placeholder="ex.: preco"'), { required: true, hint: 'Letras, números, "-" ou "_", sem espaços.' })}${UI.field('body', 'Texto', UI.textarea('body', '', 'rows="5" required'), { required: true })}<button class="btn">Salvar</button></form></div>` : ''}</div>`;
+    const form = box.querySelector('#qrForm');
+    if (form)
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          UI.ok((await api('/quick-replies', { method: 'POST', body: UI.formData(form) })).message);
+          this.respostas(box);
+        } catch (err) {
+          UI.showErrors(form, err);
+        }
+      };
+    box.onclick = async (e) => {
+      const del = e.target.closest('[data-del]');
+      const edit = e.target.closest('[data-edit]');
+      try {
+        if (del && (await UI.confirm('Excluir esta resposta rápida?', { danger: true, okLabel: 'Excluir' }))) {
+          UI.ok((await api(`/quick-replies/${del.dataset.del}`, { method: 'DELETE' })).message);
+          this.respostas(box);
+        }
+        if (edit) {
+          const r = list.find((x) => x.id === Number(edit.dataset.edit));
+          const body = await UI.prompt(`Texto de /${r.shortcut}`, { title: 'Editar resposta rápida', multiline: true });
+          if (body) {
+            UI.ok((await api(`/quick-replies/${r.id}`, { method: 'PUT', body: { body } })).message);
+            this.respostas(box);
+          }
+        }
+      } catch (err) {
+        UI.err(err);
+      }
+    };
   },
 
   backup(box) {

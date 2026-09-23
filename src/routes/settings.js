@@ -36,13 +36,7 @@ router.get('/', requireAuth, async (req, res, next) => {
     res.json({
       settings: rows[0],
       stages: stages.rows,
-      integrations: {
-        smtp: { configured: mailer.configured },
-        whatsapp: {
-          configured: config.whatsapp.configured,
-          phone_number_id: config.whatsapp.configured ? config.whatsapp.phoneNumberId : null,
-        },
-      },
+      integrations: { smtp: { configured: mailer.configured } },
     });
   } catch (err) {
     next(err);
@@ -67,6 +61,7 @@ router.put(
         .refine(isValidTimezone, 'Fuso horário inválido (use o formato IANA, ex.: America/Sao_Paulo).')
         .optional(),
       auto_distribution: z.boolean().optional(),
+      inbox_auto_lead: z.boolean().optional(),
       demo_mode: z.boolean().optional(),
       contact_sources: z.array(z.string().trim().min(1).max(60)).min(1).max(30).optional(),
       channels: z.array(z.string().trim().min(1).max(60)).min(1).max(30).optional(),
@@ -88,7 +83,7 @@ router.put(
         primary_color = COALESCE($4, primary_color), accent_color = COALESCE($5, accent_color),
         timezone = COALESCE($6, timezone), auto_distribution = COALESCE($7, auto_distribution),
         demo_mode = COALESCE($8, demo_mode), contact_sources = COALESCE($9, contact_sources),
-        channels = COALESCE($10, channels), updated_at = now()
+        channels = COALESCE($10, channels), inbox_auto_lead = COALESCE($11, inbox_auto_lead), updated_at = now()
        WHERE company_id = app_company_id() RETURNING *`,
         [
           d.name ?? null,
@@ -101,6 +96,7 @@ router.put(
           d.demo_mode ?? null,
           d.contact_sources ?? null,
           d.channels ?? null,
+          d.inbox_auto_lead ?? null,
         ],
       );
       await audit(req, 'settings_update', 'company_settings', req.user.company_id, { fields: Object.keys(d) });

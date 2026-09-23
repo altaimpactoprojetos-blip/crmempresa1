@@ -45,7 +45,7 @@ cp .env.example .env
 | `COOKIE_SECURE` | produção | `true` quando servido por HTTPS |
 | `NODE_ENV` | produção | `production` |
 | `SMTP_*`, `MAIL_FROM` | não | Envio do e-mail de recuperação de senha |
-| `WHATSAPP_*` | não | Integração com a API oficial do WhatsApp |
+| `ENCRYPTION_KEY` | recomendado | Chave para criptografar os tokens de WhatsApp das empresas (padrão: `SESSION_SECRET`). Trocar exige reconectar os números |
 
 O arquivo `.env` **não deve ser versionado** (já está no `.gitignore`). Em produção o servidor se recusa a iniciar com o `SESSION_SECRET` de exemplo.
 
@@ -113,13 +113,11 @@ O sistema roda em um único processo (as notificações em tempo real são em me
 - **Com SMTP configurado**: o usuário clica em "Esqueci minha senha" e recebe o link por e-mail (válido por 1 hora).
 - **Sem SMTP**: o link é gravado no log do servidor, e o administrador pode gerar um link em **Configurações › Usuários › Senha** e enviá-lo por um canal seguro.
 
-## 6. WhatsApp (API oficial, opcional)
+## 6. WhatsApp (API oficial)
 
-1. Crie um app no Meta for Developers com o produto WhatsApp e obtenha o *Phone Number ID* e um token permanente.
-2. Preencha `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN` (valor à sua escolha) e `WHATSAPP_APP_SECRET` no `.env` e reinicie.
-3. No painel da Meta, configure o webhook para `https://SEU_DOMINIO/api/whatsapp/webhook` com o mesmo *verify token* e assine o campo `messages`.
+Cada empresa conecta o próprio número pela interface, em **Configurações › WhatsApp** — não há nada a configurar no servidor além de ter o CRM acessível por **HTTPS** com domínio (a Meta só entrega webhooks para URLs públicas com certificado válido).
 
-Mensagens recebidas são associadas ao cliente pelo telefone e ao atendimento aberto mais recente. Sem credenciais, a tela **Configurações › Integrações** mostra "Desconectado" e nada é simulado.
+A tela mostra o passo a passo na Meta, valida o token antes de salvar e exibe a URL e o token de verificação do webhook de cada número. Mensagens recebidas viram conversas na caixa de entrada; contatos novos viram clientes e oportunidades no funil.
 
 ## 7. Backup e restauração
 

@@ -10,6 +10,16 @@ function normalizePhone(s) {
   return d;
 }
 
+// Formas equivalentes de um celular brasileiro: o WhatsApp às vezes informa o número sem o 9
+// inicial (55 + DDD + 8 dígitos), enquanto o cadastro costuma ter os 9 dígitos.
+function brPhoneVariants(digits) {
+  const d = onlyDigits(digits);
+  if (!d) return [];
+  if (d.startsWith('55') && d.length === 12 && /[6-9]/.test(d[4])) return [d, d.slice(0, 4) + '9' + d.slice(4)];
+  if (d.startsWith('55') && d.length === 13 && d[4] === '9') return [d, d.slice(0, 4) + d.slice(5)];
+  return [d];
+}
+
 function normalizeEmail(s) {
   if (!s) return null;
   const e = String(s).trim().toLowerCase();
@@ -103,4 +113,13 @@ function parseCsv(text) {
   return rows;
 }
 
-module.exports = { onlyDigits, normalizePhone, normalizeEmail, validDocument, nextProtocol, toCsv, parseCsv };
+module.exports = {
+  onlyDigits,
+  normalizePhone,
+  brPhoneVariants,
+  normalizeEmail,
+  validDocument,
+  nextProtocol,
+  toCsv,
+  parseCsv,
+};

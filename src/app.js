@@ -16,9 +16,9 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(securityHeaders);
 
-// Corpo das requisições. O webhook do WhatsApp guarda o corpo bruto para validar a assinatura.
+// Corpo das requisições. Webhooks guardam o corpo bruto para validar a assinatura.
 app.use(
-  '/api/whatsapp/webhook',
+  '/api/webhooks',
   express.json({
     verify: (req, _res, buf) => {
       req.rawBody = buf;
