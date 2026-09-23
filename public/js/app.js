@@ -3,6 +3,8 @@
 const CRM = window.CRM;
 Object.assign(CRM, {
   user: null,
+  company: null,
+  product: {},
   settings: null,
   users: [],
   es: null,
@@ -67,12 +69,23 @@ function renderAuth(view = 'login', param) {
     ${UI.field('confirm', 'Confirmar senha', UI.input('confirm', '', 'type="password" required autocomplete="new-password"'), { required: true })}
     <button class="btn" style="width:100%">Salvar nova senha</button></form>
     <p class="center mt small"><a href="#/login">Voltar ao login</a></p>`;
+  else if (view === 'signup')
+    body = `
+    <h2 class="center">Criar conta grátis</h2>
+    <p class="muted center small">Teste todas as funções gratuitamente. Não pedimos cartão de crédito.</p>
+    <form id="authForm">${UI.field('company_name', 'Nome da empresa', UI.input('company_name', '', 'required autocomplete="organization"'), { required: true })}
+    ${UI.field('name', 'Seu nome', UI.input('name', '', 'required autocomplete="name"'), { required: true })}
+    ${UI.field('email', 'E-mail', UI.input('email', '', 'type="email" required autocomplete="email"'), { required: true, hint: 'Você vai usar este e-mail para entrar.' })}
+    ${UI.field('password', 'Senha', UI.input('password', '', 'type="password" required minlength="8" autocomplete="new-password"'), { required: true, hint: 'Mínimo de 8 caracteres.' })}
+    <button class="btn" style="width:100%">Criar conta</button></form>
+    <p class="center mt small">Já tem conta? <a href="#/login">Entrar</a></p>`;
   else
     body = `
     <form id="authForm">${UI.field('email', 'E-mail', UI.input('email', '', 'type="email" required autocomplete="username"'), { required: true })}
     ${UI.field('password', 'Senha', UI.input('password', '', 'type="password" required autocomplete="current-password"'), { required: true })}
     <button class="btn" style="width:100%">Entrar</button></form>
-    <p class="center mt small"><a href="#/esqueci-senha">Esqueci minha senha</a></p>`;
+    <p class="center mt small"><a href="#/esqueci-senha">Esqueci minha senha</a></p>
+    ${CRM.product.allow_signup ? '<p class="center small">Ainda não tem conta? <a href="#/criar-conta">Criar conta grátis</a></p>' : ''}`;
   root.innerHTML = `<div class="auth-wrap"><div class="auth-card">${brandHtml()}${CRM.settings && CRM.settings.demo_mode ? '<div class="alert warning small">Modo de demonstração: os dados são fictícios.</div>' : ''}${body}</div></div>`;
   const form = root.querySelector('#authForm');
   form.onsubmit = async (e) => {
@@ -81,11 +94,12 @@ function renderAuth(view = 'login', param) {
     btn.disabled = true;
     const d = UI.formData(form);
     try {
-      if (view === 'login') {
-        const r = await api('/auth/login', { method: 'POST', body: d });
-        CRM.user = r.user;
+      if (view === 'login' || view === 'signup') {
+        const r = await api(view === 'login' ? '/auth/login' : '/auth/signup', { method: 'POST', body: d });
+        CRM.user = null; // recarrega usuário e empresa em boot()
         location.hash = '#/';
         await boot();
+        if (view === 'signup') UI.ok(`Bem-vindo(a), ${r.user.name}! Sua conta de teste está pronta.`);
       } else if (view === 'forgot') {
         const r = await api('/auth/forgot-password', { method: 'POST', body: { email: d.email } });
         UI.ok(r.message);
@@ -124,6 +138,17 @@ const NAV = [
   ['#/configuracoes', 'Configurações', 'settings'],
 ];
 
+function trialBannerHtml() {
+  const c = CRM.company;
+  if (!c || c.status !== 'trial' || !c.trial_ends_at) return '';
+  const days = Math.max(0, Math.ceil((new Date(c.trial_ends_at) - Date.now()) / 86400000));
+  const text =
+    days > 0
+      ? `Período de teste: ${days} ${days === 1 ? 'dia restante' : 'dias restantes'}.`
+      : 'Seu período de teste terminou.';
+  return `<div class="trial-banner">${text}</div>`;
+}
+
 function renderShell() {
   root.innerHTML = `<div id="app">
     <aside class="sidebar" id="sidebar">${brandHtml()}
@@ -132,6 +157,7 @@ function renderShell() {
     </aside>
     <div class="main">
       ${CRM.settings.demo_mode ? '<div class="demo-banner">Modo de demonstração — os dados exibidos são fictícios. Desative em Configurações › Empresa.</div>' : ''}
+      ${trialBannerHtml()}
       <header class="topbar">
         <button class="icon-btn menu-toggle" id="menuToggle" aria-label="Menu">${UI.icons.menu}</button>
         <div class="search">${UI.icons.search}<input id="globalSearch" placeholder="Buscar cliente, protocolo, telefone..." autocomplete="off"><div class="search-results" id="searchResults" hidden></div></div>
@@ -323,10 +349,11 @@ async function route() {
   const p0 = parts[0] || '';
   if (!CRM.user) {
     if (p0 === 'esqueci-senha') return renderAuth('forgot');
+    if (p0 === 'criar-conta' && CRM.product.allow_signup) return renderAuth('signup');
     if (p0 === 'redefinir-senha' && parts[1]) return renderAuth('reset', parts[1]);
     return renderAuth('login');
   }
-  if (p0 === 'login' || p0 === 'esqueci-senha' || p0 === 'redefinir-senha') {
+  if (['login', 'esqueci-senha', 'redefinir-senha', 'criar-conta'].includes(p0)) {
     location.hash = '#/';
     return;
   }
@@ -390,14 +417,18 @@ CRM.pages.profile = {
 
 async function boot() {
   try {
-    CRM.settings = (await api('/settings/public')).settings;
+    const pub = await api('/settings/public');
+    CRM.settings = pub.settings;
+    CRM.product = pub.product || {};
     applyBranding();
   } catch (_) {
     CRM.settings = {};
   }
   if (!CRM.user) {
     try {
-      CRM.user = (await api('/auth/me')).user;
+      const me = await api('/auth/me');
+      CRM.user = me.user;
+      CRM.company = me.company;
     } catch (_) {
       CRM.user = null;
     }

@@ -2,7 +2,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { z } = require('zod');
-const { query, tx } = require('../db');
+const { query, tx, runAsSystem } = require('../db');
 const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole, ROLES } = require('../middleware/auth');
 const { badRequest, notFound, conflict } = require('../lib/errors');
@@ -42,7 +42,8 @@ const userSchema = z.object({
 router.post('/', requireRole('admin'), validate(userSchema.required({ password: true })), async (req, res, next) => {
   try {
     const d = req.data;
-    const dup = await query('SELECT 1 FROM users WHERE lower(email) = lower($1)', [d.email]);
+    // O e-mail identifica o login e é único entre todas as empresas.
+    const dup = await runAsSystem(() => query('SELECT 1 FROM users WHERE lower(email) = lower($1)', [d.email]));
     if (dup.rowCount)
       return next(badRequest('Já existe um usuário com este e-mail.', { fields: { email: 'E-mail já cadastrado.' } }));
     const hash = await bcrypt.hash(d.password, 12);
@@ -65,7 +66,9 @@ router.put('/:id', requireRole('admin'), validate(userSchema.partial()), async (
     const cur = await query('SELECT * FROM users WHERE id = $1', [id]);
     if (!cur.rowCount) return next(notFound('Usuário não encontrado.'));
     if (d.email) {
-      const dup = await query('SELECT 1 FROM users WHERE lower(email) = lower($1) AND id <> $2', [d.email, id]);
+      const dup = await runAsSystem(() =>
+        query('SELECT 1 FROM users WHERE lower(email) = lower($1) AND id <> $2', [d.email, id]),
+      );
       if (dup.rowCount)
         return next(
           badRequest('Já existe um usuário com este e-mail.', { fields: { email: 'E-mail já cadastrado.' } }),

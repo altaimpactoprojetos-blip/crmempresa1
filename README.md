@@ -6,8 +6,8 @@ CRM de nível intermediário para equipes de atendimento de até ~10 pessoas tra
 
 ## Requisitos
 
-- Node.js 18 ou superior (testado com 22)
-- PostgreSQL 13 ou superior (testado com 16), com `pg_dump`/`pg_restore` para backups
+- Node.js 20.10 ou superior (testado com 22)
+- PostgreSQL 15 ou superior (testado com 16), com `pg_dump`/`pg_restore` para backups
 
 ## Instalação rápida
 
@@ -16,11 +16,21 @@ git clone <este-repositorio> crm && cd crm
 npm install
 cp .env.example .env          # edite DATABASE_URL, SESSION_SECRET e APP_URL
 npm run migrate               # cria as tabelas
-npm run create-admin          # cria o primeiro administrador (interativo)
+npm run create-admin          # cria uma empresa e o seu administrador (interativo)
 npm start                     # http://localhost:3000
 ```
 
 Instruções completas (criação do banco, produção com HTTPS, serviço systemd, SMTP, WhatsApp): **[docs/INSTALACAO.md](docs/INSTALACAO.md)**.
+
+## SaaS: várias empresas no mesmo servidor
+
+Cada empresa-cliente cria a sua conta em **Criar conta grátis** (tela de login), recebe um período de teste (`TRIAL_DAYS`, padrão 14 dias), o seu próprio funil, configurações, identidade visual e equipe. Os dados de cada empresa ficam isolados pelo próprio PostgreSQL (Row Level Security) — detalhes em [docs/ARQUITETURA.md](docs/ARQUITETURA.md#multiempresa-saas).
+
+| Variável | Uso |
+|---|---|
+| `APP_NAME` | Nome do produto na tela de login e de cadastro |
+| `ALLOW_SIGNUP` | `false` desativa o cadastro público (empresas criadas só por `npm run create-admin`) |
+| `TRIAL_DAYS` | Dias de teste para novas empresas |
 
 ## Perfis de acesso
 

@@ -51,6 +51,23 @@ router.post('/', requireRole('admin', 'supervisor'), validate(schema), async (re
 - **Auditoria:** ações importantes chamam `audit(req, ...)`.
 - **Tempo real:** mudanças que outras telas precisam ver chamam `broadcast(evento, dados)`.
 
+## Multiempresa (SaaS)
+
+Um único servidor atende várias empresas. O isolamento é garantido **pelo banco**, não só pelo código:
+
+- Toda tabela de dados tem `company_id`, preenchido automaticamente (`DEFAULT app_company_id()`).
+- Políticas de **Row Level Security forçadas** (migração `003_multiempresa.sql`) só deixam ler e gravar linhas da empresa do contexto — mesmo que uma consulta esqueça o filtro.
+- Chaves estrangeiras são compostas `(company_id, id)`: um registro nunca aponta para dados de outra empresa.
+- O servidor se recusa a iniciar se o usuário do banco for superusuário ou tiver `BYPASSRLS` (eles ignorariam as políticas).
+
+Como isso aparece no código (`src/db.js`):
+
+- Requisições autenticadas já rodam no contexto da empresa do usuário (`middleware/auth.js`). `query()` e `tx()` funcionam normalmente.
+- Sem contexto, `query()` **lança erro** (falha fechada). Rotas sem login (login, cadastro, recuperação de senha, webhooks) e scripts usam `runAsSystem(() => ...)` explicitamente, só para o necessário, e voltam para `runAsCompany(id, ...)` assim que sabem a empresa.
+- Eventos em tempo real (`broadcast`) só chegam a usuários da empresa do contexto.
+
+Ao criar uma **tabela nova** de dados: inclua `company_id INTEGER NOT NULL DEFAULT app_company_id() REFERENCES companies(id) ON DELETE CASCADE`, ative e force RLS com a política `tenant_isolation` (copie o padrão da migração 003), use FKs compostas para tabelas da empresa e escreva um teste em `tests/multiempresa.test.js`.
+
 ## Datas e fuso horário
 
 O servidor e o banco trabalham em UTC (`timestamptz`). Tudo que depende de "dia" — tarefas de hoje, filtros "de/até", relatórios — usa o **fuso configurado pela empresa** (`company_settings.timezone`) por meio de `src/lib/timezone.js`:

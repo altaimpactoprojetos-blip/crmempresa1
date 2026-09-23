@@ -1,6 +1,9 @@
 'use strict';
 // Notificação em tempo real via Server-Sent Events (processo único).
-const clients = new Map(); // res -> userId
+// Cada conexão pertence a uma empresa: eventos só chegam a usuários da mesma empresa.
+const { currentCompanyId } = require('../db');
+
+const clients = new Map(); // res -> { userId, companyId }
 
 function subscribe(req, res) {
   res.writeHead(200, {
@@ -10,7 +13,7 @@ function subscribe(req, res) {
     'X-Accel-Buffering': 'no',
   });
   res.write(`event: hello\ndata: {}\n\n`);
-  clients.set(res, req.user.id);
+  clients.set(res, { userId: req.user.id, companyId: req.user.company_id });
   const ping = setInterval(() => {
     try {
       res.write(': ping\n\n');
@@ -24,11 +27,13 @@ function subscribe(req, res) {
   });
 }
 
-// Envia para todos (ou só para userIds informados)
-function broadcast(event, data = {}, userIds) {
+// Envia aos usuários da empresa do contexto atual (ou só aos userIds informados).
+function broadcast(event, data = {}, userIds, companyId = currentCompanyId()) {
+  if (!companyId) return;
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const [res, uid] of clients) {
-    if (userIds && !userIds.includes(uid)) continue;
+  for (const [res, client] of clients) {
+    if (client.companyId !== companyId) continue;
+    if (userIds && !userIds.includes(client.userId)) continue;
     try {
       res.write(payload);
     } catch (_) {

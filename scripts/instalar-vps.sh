@@ -10,6 +10,7 @@
 # Variáveis:
 #   ADMIN_EMAIL, ADMIN_SENHA  primeiro administrador (obrigatórias só na primeira instalação)
 #   ADMIN_NOME                nome do administrador (padrão: Administrador)
+#   ADMIN_EMPRESA             nome da primeira empresa (padrão: Minha Empresa)
 #   DOMINIO                   ex.: crm.empresa.com.br — com domínio o Caddy ativa HTTPS; sem ele, HTTP pelo IP
 #   REPO_URL, BRANCH          origem do código (padrão: repositório oficial, branch padrão)
 #
@@ -20,6 +21,7 @@ REPO_URL="${REPO_URL:-https://github.com/altaimpactoprojetos-blip/crmempresa1.gi
 BRANCH="${BRANCH:-}"
 DOMINIO="${DOMINIO:-}"
 ADMIN_NOME="${ADMIN_NOME:-Administrador}"
+ADMIN_EMPRESA="${ADMIN_EMPRESA:-Minha Empresa}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-}"
 ADMIN_SENHA="${ADMIN_SENHA:-}"
 
@@ -120,7 +122,7 @@ ADMINS="$(sudo -u postgres psql -d "$DB_NAME" -tAc "SELECT count(*) FROM users W
 if [ "$ADMINS" = "0" ]; then
   [ -n "$ADMIN_EMAIL" ] && [ -n "$ADMIN_SENHA" ] || falha "informe ADMIN_EMAIL e ADMIN_SENHA para criar o primeiro administrador."
   passo "Primeiro administrador"
-  sudo -u "$APP_USER" -H env ADMIN_NAME="$ADMIN_NOME" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_SENHA" \
+  sudo -u "$APP_USER" -H env ADMIN_COMPANY="$ADMIN_EMPRESA" ADMIN_NAME="$ADMIN_NOME" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_SENHA" \
     bash -c "cd '$APP_DIR' && npm run create-admin"
 fi
 

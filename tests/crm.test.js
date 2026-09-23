@@ -1,16 +1,16 @@
 'use strict';
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { pool, resetDb, startServer, client, createUser } = require('./helpers');
+const { pool, resetDb, startServer, client, createTestCompany, createUser } = require('./helpers');
 
 let server, base, admin, sup, at1, at2;
 
 before(async () => {
   await resetDb();
-  await createUser('Admin', 'admin@t.com', 'admin');
-  await createUser('Supervisora', 'sup@t.com', 'supervisor');
-  await createUser('Atendente Um', 'a1@t.com', 'atendente');
-  await createUser('Atendente Dois', 'a2@t.com', 'atendente');
+  const companyId = await createTestCompany('Empresa Teste', 'Admin', 'admin@t.com');
+  await createUser(companyId, 'Supervisora', 'sup@t.com', 'supervisor');
+  await createUser(companyId, 'Atendente Um', 'a1@t.com', 'atendente');
+  await createUser(companyId, 'Atendente Dois', 'a2@t.com', 'atendente');
   ({ server, base } = await startServer());
   admin = client(base);
   sup = client(base);
@@ -406,8 +406,11 @@ test('configurações: identidade visual, etapas do funil e auditoria', async ()
   assert.equal((await admin.put('/settings', { timezone: 'Marte/Olympus' })).status, 400);
   assert.equal((await admin.put('/settings', { timezone: 'America/Manaus' })).status, 200);
   assert.equal((await admin.put('/settings', { timezone: 'America/Sao_Paulo' })).status, 200);
-  const pub = (await client(base).get('/settings/public')).data.settings;
-  assert.equal(pub.name, 'Empresa Teste');
+  // Antes do login: identidade do produto; logado: a da empresa.
+  const pub = (await client(base).get('/settings/public')).data;
+  assert.equal(pub.settings.name, 'CRM');
+  assert.equal(pub.product.allow_signup, true);
+  assert.equal((await admin.get('/settings/public')).data.settings.name, 'Empresa Teste');
   const stages = (await admin.get('/settings/stages')).data.stages;
   r = await admin.put('/settings/stages', {
     stages: [

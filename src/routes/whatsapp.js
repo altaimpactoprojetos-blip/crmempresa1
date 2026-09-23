@@ -4,7 +4,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { z } = require('zod');
-const { query } = require('../db');
+const { query, runAsCompany } = require('../db');
 const config = require('../config');
 const { validate } = require('../middleware/validate');
 const { requireAuth } = require('../middleware/auth');
@@ -112,47 +112,50 @@ router.post('/webhook', async (req, res) => {
       return res.sendStatus(401);
   }
   res.sendStatus(200);
-  try {
-    for (const entry of req.body.entry || []) {
-      for (const change of entry.changes || []) {
-        const v = change.value || {};
-        for (const m of v.messages || []) {
-          const phone = normalizePhone(m.from);
-          const body = m.text?.body || `[${m.type}]`;
-          const cust = (await query('SELECT id FROM customers WHERE phone_digits = $1 LIMIT 1', [phone])).rows[0];
-          const ticket = cust
-            ? (
-                await query(
-                  `SELECT id FROM tickets WHERE customer_id = $1 AND status NOT IN ('resolvido','cancelado') ORDER BY opened_at DESC LIMIT 1`,
-                  [cust.id],
-                )
-              ).rows[0]
-            : null;
-          await query(
-            `INSERT INTO whatsapp_messages (customer_id, ticket_id, direction, wa_message_id, phone_digits, body, status, raw)
+  // Integração por variáveis de ambiente atende uma única empresa (WHATSAPP_COMPANY_ID).
+  runAsCompany(wa.companyId, () => processWebhook(req.body)).catch((err) =>
+    console.error('Erro ao processar webhook do WhatsApp:', err.message),
+  );
+});
+
+async function processWebhook(payload) {
+  for (const entry of payload.entry || []) {
+    for (const change of entry.changes || []) {
+      const v = change.value || {};
+      for (const m of v.messages || []) {
+        const phone = normalizePhone(m.from);
+        const body = m.text?.body || `[${m.type}]`;
+        const cust = (await query('SELECT id FROM customers WHERE phone_digits = $1 LIMIT 1', [phone])).rows[0];
+        const ticket = cust
+          ? (
+              await query(
+                `SELECT id FROM tickets WHERE customer_id = $1 AND status NOT IN ('resolvido','cancelado') ORDER BY opened_at DESC LIMIT 1`,
+                [cust.id],
+              )
+            ).rows[0]
+          : null;
+        await query(
+          `INSERT INTO whatsapp_messages (customer_id, ticket_id, direction, wa_message_id, phone_digits, body, status, raw)
              VALUES ($1,$2,'entrada',$3,$4,$5,'recebido',$6) ON CONFLICT (wa_message_id) DO NOTHING`,
-            [cust ? cust.id : null, ticket ? ticket.id : null, m.id, phone, body, JSON.stringify(m)],
+          [cust ? cust.id : null, ticket ? ticket.id : null, m.id, phone, body, JSON.stringify(m)],
+        );
+        if (ticket) {
+          await query(
+            `INSERT INTO ticket_events (ticket_id, kind, direction, channel, body, payload) VALUES ($1,'interaction','entrada','WhatsApp',$2,$3)`,
+            [ticket.id, body, JSON.stringify({ via: 'whatsapp_api', wa_message_id: m.id })],
           );
-          if (ticket) {
-            await query(
-              `INSERT INTO ticket_events (ticket_id, kind, direction, channel, body, payload) VALUES ($1,'interaction','entrada','WhatsApp',$2,$3)`,
-              [ticket.id, body, JSON.stringify({ via: 'whatsapp_api', wa_message_id: m.id })],
-            );
-          }
-          broadcast('whatsapp_message', {
-            customer_id: cust ? cust.id : null,
-            ticket_id: ticket ? ticket.id : null,
-            phone,
-          });
         }
-        for (const s of v.statuses || []) {
-          await query('UPDATE whatsapp_messages SET status = $1 WHERE wa_message_id = $2', [s.status, s.id]);
-        }
+        broadcast('whatsapp_message', {
+          customer_id: cust ? cust.id : null,
+          ticket_id: ticket ? ticket.id : null,
+          phone,
+        });
+      }
+      for (const s of v.statuses || []) {
+        await query('UPDATE whatsapp_messages SET status = $1 WHERE wa_message_id = $2', [s.status, s.id]);
       }
     }
-  } catch (err) {
-    console.error('Erro ao processar webhook do WhatsApp:', err.message);
   }
-});
+}
 
 module.exports = router;
