@@ -7,7 +7,10 @@ const { pool } = require('../src/db');
 
 async function main() {
   const dir = path.join(__dirname, '..', 'src', 'migrations');
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+  const files = fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
   const client = await pool.connect();
   try {
     await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -36,4 +39,7 @@ async function main() {
   }
 }
 
-main().catch((err) => { console.error('Falha na migração:', err.message); process.exit(1); });
+main().catch((err) => {
+  console.error('Falha na migração:', err.message);
+  process.exit(1);
+});

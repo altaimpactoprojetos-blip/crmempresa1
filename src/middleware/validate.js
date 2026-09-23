@@ -24,7 +24,8 @@ function translate(issue) {
       if (issue.received === 'undefined' || issue.received === 'null') return 'Campo obrigatório.';
       return 'Valor inválido.';
     case 'too_small':
-      if (issue.type === 'string') return issue.minimum <= 1 ? 'Campo obrigatório.' : `Mínimo de ${issue.minimum} caracteres.`;
+      if (issue.type === 'string')
+        return issue.minimum <= 1 ? 'Campo obrigatório.' : `Mínimo de ${issue.minimum} caracteres.`;
       return `Valor mínimo: ${issue.minimum}.`;
     case 'too_big':
       if (issue.type === 'string') return `Máximo de ${issue.maximum} caracteres.`;

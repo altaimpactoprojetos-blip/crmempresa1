@@ -75,6 +75,17 @@ Agende no cron (ex.: `0 2 * * * cd /caminho/do/crm && npm run backup >> backups/
 
 Cada instalação é independente: novo banco, novo `.env`, e em **Configurações › Empresa** define-se nome, logotipo e cores. Canais, origens de contato e etapas do funil também são configuráveis pela interface. Não há nada específico de uma empresa no código.
 
+## Desenvolvimento
+
+```bash
+npm run dev                  # servidor com recarga automática
+npm run lint                 # ESLint (erros de código)
+npm run format               # Prettier (formatação padronizada)
+npm run check                # lint + formatação + testes — rode antes de cada commit
+```
+
+A integração contínua (`.github/workflows/ci.yml`) roda `lint`, `format:check` e os testes com PostgreSQL a cada push e pull request. Convenções de código e organização: **[docs/ARQUITETURA.md](docs/ARQUITETURA.md)**.
+
 ## Testes
 
 ```bash
@@ -82,19 +93,22 @@ createdb crm_test            # ou: CREATE DATABASE crm_test OWNER crm;
 npm test                     # usa DATABASE_URL_TEST (padrão postgres://crm:crm@localhost:5432/crm_test)
 ```
 
-Os testes de integração cobrem o fluxo completo (cliente → atendimento → assumir → interação → oportunidade → retorno → transferência → encerramento), permissões entre perfis, disputa simultânea pelo mesmo atendimento, rodízio, desativação de usuário, recuperação de senha, importação CSV, controle de versão e relatórios.
+Os testes de integração cobrem o fluxo completo (cliente → atendimento → assumir → interação → oportunidade → retorno → transferência → encerramento), permissões entre perfis, disputa simultânea pelo mesmo atendimento, rodízio, desativação de usuário, recuperação de senha, importação CSV, controle de versão, relatórios e fuso horário.
 
 ## Estrutura
 
 ```
 src/
-  server.js, app.js        # servidor Express, sessões, segurança
-  config.js, db.js         # variáveis de ambiente e pool PostgreSQL
+  server.js                # inicialização: verifica banco e sobe o servidor
+  app.js                   # monta o Express: segurança, sessão, API, frontend, erros
+  config.js, db.js         # variáveis de ambiente e pool PostgreSQL (query/tx)
   migrations/*.sql         # esquema do banco (aplicado por npm run migrate)
-  routes/                  # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications, whatsapp
-  middleware/, lib/        # autenticação/permissões, validação, auditoria, tempo real, e-mail
-public/                    # frontend (SPA sem build): index.html, css/, js/
+  routes/index.js          # registro central das rotas /api
+  routes/<módulo>.js       # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications, whatsapp
+  middleware/              # security, session, csrf, auth, validate, errorHandler
+  lib/                     # errors, audit, notify, realtime, mailer, timezone, util
+public/                    # frontend (SPA sem build): index.html, css/, js/api.js, js/ui.js, js/pages/, js/app.js
 scripts/                   # migrate, create-admin, seed-demo, backup.sh, restore.sh
 tests/                     # testes de integração (node:test)
-docs/INSTALACAO.md         # guia detalhado de instalação e operação
+docs/                      # INSTALACAO.md (operação) e ARQUITETURA.md (convenções de código)
 ```
