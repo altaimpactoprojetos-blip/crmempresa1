@@ -38,6 +38,10 @@ test('autenticação: rejeita senha errada, exige cabeçalho de proteção e ses
   assert.equal(noHeader.status, 403);
   const me = await anon.get('/auth/me');
   assert.equal(me.status, 401);
+  // Sem HTTPS (COOKIE_SECURE desligado), o navegador não pode ser forçado a trocar HTTP por HTTPS.
+  const page = await fetch(base + '/');
+  assert.doesNotMatch(page.headers.get('content-security-policy'), /upgrade-insecure-requests/);
+  assert.equal(page.headers.get('strict-transport-security'), null);
   const val = await anon.post('/auth/login', { email: 'nao-e-email', password: '' });
   assert.equal(val.status, 400);
   assert.ok(val.data.fields.email);
