@@ -9,6 +9,7 @@ const { audit } = require('../lib/audit');
 const { broadcast } = require('../lib/realtime');
 const { notify } = require('../lib/notify');
 const { nextProtocol, toCsv } = require('../lib/util');
+const { startOfDaySql, endOfDaySql, isDateString } = require('../lib/timezone');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -81,8 +82,8 @@ router.get('/', async (req, res, next) => {
     if (q.customer_id) { params.push(Number(q.customer_id)); where.push(`t.customer_id = $${params.length}`); }
     if (q.follow_up === 'pending') where.push(`t.follow_up_at IS NOT NULL AND t.status = ANY('{aguardando,em_atendimento,aguardando_cliente}')`);
     if (q.q) { params.push(`%${q.q.trim()}%`); where.push(`(t.protocol ILIKE $${params.length} OR t.subject ILIKE $${params.length} OR c.name ILIKE $${params.length} OR c.phone ILIKE $${params.length})`); }
-    if (q.from) { params.push(q.from); where.push(`t.opened_at >= $${params.length}::timestamptz`); }
-    if (q.to) { params.push(q.to); where.push(`t.opened_at < ($${params.length}::date + 1)`); }
+    if (isDateString(q.from)) { params.push(q.from); where.push(`t.opened_at >= ${startOfDaySql(`$${params.length}`)}`); }
+    if (isDateString(q.to)) { params.push(q.to); where.push(`t.opened_at < ${endOfDaySql(`$${params.length}`)}`); }
     const limit = Math.min(Number(q.limit) || 50, 300);
     const page = Math.max(Number(q.page) || 1, 1);
     const base = `FROM tickets t JOIN customers c ON c.id = t.customer_id LEFT JOIN users u ON u.id = t.assignee_id LEFT JOIN users cb ON cb.id = t.created_by WHERE ${where.join(' AND ')}`;
@@ -99,8 +100,8 @@ router.get('/export.csv', async (req, res, next) => {
   try {
     const params = [];
     const where = [scopeSql(req.user, params)];
-    if (req.query.from) { params.push(req.query.from); where.push(`t.opened_at >= $${params.length}::timestamptz`); }
-    if (req.query.to) { params.push(req.query.to); where.push(`t.opened_at < ($${params.length}::date + 1)`); }
+    if (isDateString(req.query.from)) { params.push(req.query.from); where.push(`t.opened_at >= ${startOfDaySql(`$${params.length}`)}`); }
+    if (isDateString(req.query.to)) { params.push(req.query.to); where.push(`t.opened_at < ${endOfDaySql(`$${params.length}`)}`); }
     const { rows } = await query(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY t.opened_at DESC`, params);
     await audit(req, 'tickets_export', 'ticket', null, { count: rows.length });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');

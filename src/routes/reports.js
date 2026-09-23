@@ -3,6 +3,7 @@ const express = require('express');
 const { query } = require('../db');
 const { requireAuth, isManager } = require('../middleware/auth');
 const { toCsv } = require('../lib/util');
+const { startOfDaySql, endOfDaySql, isDateString } = require('../lib/timezone');
 const { STATUS_LABEL } = require('./tickets');
 
 const router = express.Router();
@@ -19,8 +20,8 @@ function buildFilters(req) {
   const p = [];
   const f = { ticket: [], opp: [], from: null, to: null };
   const q = req.query;
-  const from = q.from && /^\d{4}-\d{2}-\d{2}$/.test(q.from) ? q.from : null;
-  const to = q.to && /^\d{4}-\d{2}-\d{2}$/.test(q.to) ? q.to : null;
+  const from = isDateString(q.from) ? q.from : null;
+  const to = isDateString(q.to) ? q.to : null;
   f.from = from; f.to = to;
   let assignee = q.assignee_id ? Number(q.assignee_id) : null;
   if (!isManager(req.user)) assignee = req.user.id;
@@ -41,7 +42,7 @@ async function run(sql, params) {
   return query(out, used.map((n) => params[n - 1]));
 }
 
-const periodSql = (col, f) => [f.fromIdx ? `${col} >= $${f.fromIdx}::date` : null, f.toIdx ? `${col} < ($${f.toIdx}::date + 1)` : null].filter(Boolean);
+const periodSql = (col, f) => [f.fromIdx ? `${col} >= ${startOfDaySql(`$${f.fromIdx}`)}` : null, f.toIdx ? `${col} < ${endOfDaySql(`$${f.toIdx}`)}` : null].filter(Boolean);
 const and = (arr) => (arr.length ? arr.join(' AND ') : 'TRUE');
 
 router.get('/summary', async (req, res, next) => {

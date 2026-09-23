@@ -7,6 +7,7 @@ const { requireAuth, isManager } = require('../middleware/auth');
 const { notFound, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { notify } = require('../lib/notify');
+const { localDate, todaySql } = require('../lib/timezone');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -38,8 +39,8 @@ router.get('/', async (req, res, next) => {
     const params = [];
     const where = [scopeSql(req.user, params)];
     const view = req.query.view || 'all';
-    if (view === 'today') where.push(`t.done_at IS NULL AND t.due_at::date = (now() AT TIME ZONE 'America/Sao_Paulo')::date`);
-    else if (view === 'upcoming') where.push(`t.done_at IS NULL AND t.due_at::date > (now() AT TIME ZONE 'America/Sao_Paulo')::date`);
+    if (view === 'today') where.push(`t.done_at IS NULL AND ${localDate('t.due_at')} = ${todaySql()}`);
+    else if (view === 'upcoming') where.push(`t.done_at IS NULL AND ${localDate('t.due_at')} > ${todaySql()}`);
     else if (view === 'overdue') where.push(`t.done_at IS NULL AND t.due_at < now()`);
     else if (view === 'open') where.push('t.done_at IS NULL');
     else if (view === 'done') where.push('t.done_at IS NOT NULL');
@@ -49,8 +50,8 @@ router.get('/', async (req, res, next) => {
     const p2 = [];
     const scope2 = scopeSql(req.user, p2);
     const summary = (await query(
-      `SELECT count(*) FILTER (WHERE done_at IS NULL AND due_at::date = (now() AT TIME ZONE 'America/Sao_Paulo')::date)::int AS today,
-              count(*) FILTER (WHERE done_at IS NULL AND due_at::date > (now() AT TIME ZONE 'America/Sao_Paulo')::date)::int AS upcoming,
+      `SELECT count(*) FILTER (WHERE done_at IS NULL AND ${localDate('due_at')} = ${todaySql()})::int AS today,
+              count(*) FILTER (WHERE done_at IS NULL AND ${localDate('due_at')} > ${todaySql()})::int AS upcoming,
               count(*) FILTER (WHERE done_at IS NULL AND due_at < now())::int AS overdue,
               count(*) FILTER (WHERE done_at IS NULL)::int AS open
        FROM tasks t WHERE ${scope2}`, p2)).rows[0];

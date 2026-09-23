@@ -113,7 +113,8 @@ test('funil: mover etapas, exigir motivo de perda e calcular conversão', async 
   assert.equal(rep.opportunities.lost_reasons[0].reason, 'Preço');
   assert.ok(rep.tickets.avg_first_response_s >= 0); assert.ok(rep.tickets.avg_resolution_s >= 0); assert.equal(rep.tickets.resolved, 1);
   assert.ok(rep.methodology.conversion);
-  const today = new Date().toISOString().slice(0, 10);
+  // "Hoje" no fuso da empresa (padrão America/Sao_Paulo), não em UTC.
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
   const filtered = await sup.get(`/reports/summary?from=${today}&to=${today}&assignee_id=3&source=WhatsApp&channel=WhatsApp`);
   assert.equal(filtered.status, 200, JSON.stringify(filtered.data)); assert.equal(filtered.data.opportunities.won, 1);
   const onlyFrom = await sup.get(`/reports/summary?from=${today}`); assert.equal(onlyFrom.status, 200);
@@ -238,6 +239,9 @@ test('configurações: identidade visual, etapas do funil e auditoria', async ()
   assert.equal(r.status, 200); assert.equal(r.data.settings.name, 'Empresa Teste');
   assert.equal((await admin.put('/settings', { primary_color: 'azul' })).status, 400);
   assert.equal((await admin.put('/settings', { logo_data: 'data:text/html;base64,PGI+' })).status, 400);
+  assert.equal((await admin.put('/settings', { timezone: 'Marte/Olympus' })).status, 400);
+  assert.equal((await admin.put('/settings', { timezone: 'America/Manaus' })).status, 200);
+  assert.equal((await admin.put('/settings', { timezone: 'America/Sao_Paulo' })).status, 200);
   const pub = (await client(base).get('/settings/public')).data.settings; assert.equal(pub.name, 'Empresa Teste');
   const stages = (await admin.get('/settings/stages')).data.stages;
   r = await admin.put('/settings/stages', { stages: [...stages.map((s) => ({ id: s.id, name: s.name, kind: s.kind })).slice(0, 4), { name: 'Contrato', kind: 'open' }, ...stages.slice(4).map((s) => ({ id: s.id, name: s.name, kind: s.kind }))] });

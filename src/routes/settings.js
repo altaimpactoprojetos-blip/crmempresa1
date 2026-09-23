@@ -1,5 +1,6 @@
 'use strict';
 const express = require('express');
+const { isValidTimezone } = require('../lib/timezone');
 const { z } = require('zod');
 const { query } = require('../db');
 const config = require('../config');
@@ -42,7 +43,7 @@ router.put('/', requireRole('admin'), validate(z.object({
   logo_data: z.string().max(400000, 'Logotipo muito grande (máx. ~300KB).').nullable().optional(),
   primary_color: color.optional(),
   accent_color: color.optional(),
-  timezone: z.string().min(1).max(60).optional(),
+  timezone: z.string().min(1).max(60).refine(isValidTimezone, 'Fuso horário inválido (use o formato IANA, ex.: America/Sao_Paulo).').optional(),
   auto_distribution: z.boolean().optional(),
   demo_mode: z.boolean().optional(),
   contact_sources: z.array(z.string().trim().min(1).max(60)).min(1).max(30).optional(),
