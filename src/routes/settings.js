@@ -2,14 +2,14 @@
 const express = require('express');
 const { isValidTimezone } = require('../lib/timezone');
 const { z } = require('zod');
-const { query } = require('../db');
+const { query, tx } = require('../db');
 const config = require('../config');
 const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { audit } = require('../lib/audit');
 const mailer = require('../lib/mailer');
 const { broadcast } = require('../lib/realtime');
-const { badRequest } = require('../lib/errors');
+const { badRequest, notFound } = require('../lib/errors');
 
 const router = express.Router();
 
@@ -32,7 +32,9 @@ router.get('/public', async (req, res, next) => {
 router.get('/', requireAuth, async (req, res, next) => {
   try {
     const { rows } = await query('SELECT * FROM company_settings WHERE company_id = app_company_id()');
-    const stages = await query('SELECT * FROM pipeline_stages ORDER BY position');
+    const stages = await query(
+      'SELECT s.* FROM pipeline_stages s JOIN pipelines p ON p.id = s.pipeline_id WHERE p.is_default ORDER BY s.position',
+    );
     res.json({
       settings: rows[0],
       stages: stages.rows,
@@ -108,11 +110,24 @@ router.put(
   },
 );
 
-// Etapas do funil
-router.get('/stages', requireAuth, async (_req, res, next) => {
+// Etapas de um funil (padrão: o funil principal da empresa)
+async function resolvePipeline(id, client) {
+  const q = client ? client.query.bind(client) : query;
+  const { rows } = await q(
+    id ? 'SELECT * FROM pipelines WHERE id = $1' : 'SELECT * FROM pipelines WHERE is_default LIMIT 1',
+    id ? [Number(id)] : [],
+  );
+  if (!rows[0]) throw notFound('Funil não encontrado.');
+  return rows[0];
+}
+
+router.get('/stages', requireAuth, async (req, res, next) => {
   try {
-    const { rows } = await query('SELECT * FROM pipeline_stages ORDER BY position');
-    res.json({ stages: rows });
+    const pipeline = await resolvePipeline(req.query.pipeline_id);
+    const { rows } = await query('SELECT * FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position', [
+      pipeline.id,
+    ]);
+    res.json({ stages: rows, pipeline });
   } catch (err) {
     next(err);
   }
@@ -123,6 +138,7 @@ router.put(
   requireRole('admin'),
   validate(
     z.object({
+      pipeline_id: z.number().int().positive().optional(),
       stages: z
         .array(
           z.object({
@@ -144,13 +160,16 @@ router.put(
         return next(badRequest('O funil precisa ter exatamente uma etapa "Ganho" e uma etapa "Perdido" ativas.'));
       }
       if (!active.some((s) => s.kind === 'open')) return next(badRequest('Inclua ao menos uma etapa aberta.'));
-      const { tx } = require('../db');
       const out = await tx(async (client) => {
-        const existing = (await client.query('SELECT id FROM pipeline_stages')).rows.map((r) => r.id);
+        const pipeline = await resolvePipeline(req.data.pipeline_id, client);
+        const existing = (
+          await client.query('SELECT id FROM pipeline_stages WHERE pipeline_id = $1', [pipeline.id])
+        ).rows.map((r) => r.id);
         const keep = new Set();
         let pos = 1;
         for (const s of list) {
           if (s.id) {
+            if (!existing.includes(s.id)) throw badRequest('Etapa não pertence a este funil.');
             keep.add(s.id);
             await client.query('UPDATE pipeline_stages SET name=$1, kind=$2, active=$3, position=$4 WHERE id=$5', [
               s.name,
@@ -161,8 +180,8 @@ router.put(
             ]);
           } else {
             const r = await client.query(
-              'INSERT INTO pipeline_stages (name, kind, active, position) VALUES ($1,$2,$3,$4) RETURNING id',
-              [s.name, s.kind, s.active !== false, pos++],
+              'INSERT INTO pipeline_stages (pipeline_id, name, kind, active, position) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+              [pipeline.id, s.name, s.kind, s.active !== false, pos++],
             );
             keep.add(r.rows[0].id);
           }
@@ -174,7 +193,9 @@ router.put(
             await client.query('UPDATE pipeline_stages SET active = FALSE, position = 999 WHERE id = $1', [id]);
           else await client.query('DELETE FROM pipeline_stages WHERE id = $1', [id]);
         }
-        return (await client.query('SELECT * FROM pipeline_stages ORDER BY position')).rows;
+        return (
+          await client.query('SELECT * FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position', [pipeline.id])
+        ).rows;
       });
       await audit(req, 'stages_update', 'pipeline_stages', null, { count: list.length });
       res.json({ stages: out, message: 'Etapas do funil atualizadas.' });

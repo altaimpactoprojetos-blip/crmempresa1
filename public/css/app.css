@@ -1977,3 +1977,16 @@ td .mono,
 td.mono {
   white-space: nowrap;
 }
+
+/* Construtor de ações das automações */
+.action-row {
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  background: var(--bg);
+}
+.action-row .field {
+  margin-bottom: 0.5rem;
+}
+.text-danger {
+  color: var(--danger);
+}

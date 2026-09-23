@@ -14,14 +14,11 @@ CRM.pages.inbox = {
     this.filter = this.filter || 'open';
     this.q = query.q || '';
     this.currentId = id || null;
-    const [channels, replies, stages] = await Promise.all([
-      api('/channels'),
-      api('/quick-replies'),
-      api('/settings/stages'),
-    ]);
+    const [channels, replies, stages] = await Promise.all([api('/channels'), api('/quick-replies'), api('/pipelines')]);
     this.channels = channels.channels;
     this.replies = replies.quick_replies;
-    CRM.stages = stages.stages;
+    // Todas as etapas de todos os funis; o seletor mostra só as do funil da oportunidade
+    CRM.stages = stages.pipelines.flatMap((p) => p.stages);
     el.innerHTML = `<div class="inbox">
       <section class="inbox-list">
         <div class="inbox-list-head">
@@ -139,7 +136,8 @@ CRM.pages.inbox = {
 
   stageSelect(c) {
     if (!c.opportunity_id) return '';
-    const stages = (CRM.stages || []).filter((s) => s.active);
+    const current = (CRM.stages || []).find((s) => s.id === c.stage_id);
+    const stages = (CRM.stages || []).filter((s) => s.active && current && s.pipeline_id === current.pipeline_id);
     if (!stages.length) return `<span class="badge">${UI.esc(c.stage_name || '')}</span>`;
     return `<select id="stageSel" class="sm" title="Etapa no funil">${stages.map((s) => `<option value="${s.id}" ${s.id === c.stage_id ? 'selected' : ''}>${UI.esc(s.name)}</option>`).join('')}</select>`;
   },

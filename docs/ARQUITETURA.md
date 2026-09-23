@@ -76,6 +76,13 @@ Ao criar uma **tabela nova** de dados: inclua `company_id INTEGER NOT NULL DEFAU
 - Mídias nunca são salvas: são buscadas na Meta quando alguém abre. Só formatos seguros abrem no navegador; o resto é baixado como arquivo.
 - **QR Code** (`lib/waweb.js`): uma conexão do WhatsApp Web por canal, no mesmo processo do servidor. Credenciais e chaves ficam em `channel_session_keys` (criptografadas); as conexões ativas são retomadas em `server.js`. Mensagens entram por `inbox.ingestMessage`, o mesmo caminho da API oficial. Nos testes, `waweb.setDriver()` troca a biblioteca por um WhatsApp falso (`tests/qrcode.test.js`).
 
+## Funis, campos personalizados e automações
+
+- `pipelines` agrupa `pipeline_stages`. Há exatamente um funil `is_default` por empresa (índice único parcial); é nele que `inbox.createLead` cria a oportunidade. Empresas novas ganham o funil padrão em `lib/companies.js`.
+- Valores de campos personalizados ficam em `customers.custom` e `opportunities.custom` (JSONB); as definições em `custom_fields`. Toda gravação passa por `customFields.clean()`, que converte os tipos e devolve erros como `custom.<chave>` (o formulário destaca o campo). Na edição os valores são mesclados (`custom || $novo`).
+- `lib/automations.js`: `onStageEntered()` é chamado depois que a transação que moveu/criou a oportunidade termina, e roda fora da requisição, no contexto da empresa. Cada ação recarrega a oportunidade e registra o resultado em `automation_runs`; uma falha não impede as seguintes. Para uma nova ação: some-a em `ACTIONS`, no esquema de `routes/automations.js` e em `actionFields()` de `public/js/pages/settings.js`.
+- Envio de mensagens (chat e automações) passa por `lib/outbox.js`.
+
 ## Datas e fuso horário
 
 O servidor e o banco trabalham em UTC (`timestamptz`). Tudo que depende de "dia" — tarefas de hoje, filtros "de/até", relatórios — usa o **fuso configurado pela empresa** (`company_settings.timezone`) por meio de `src/lib/timezone.js`:

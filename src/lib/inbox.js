@@ -1,7 +1,7 @@
 'use strict';
 // Caixa de entrada: processa o que chega pelo webhook do WhatsApp e mantém as conversas.
 // Roda sempre no contexto da empresa dona do canal (runAsCompany).
-const { tx } = require('../db');
+const { tx, currentCompanyId } = require('../db');
 const { broadcast } = require('./realtime');
 const { normalizePhone, brPhoneVariants } = require('./util');
 
@@ -74,7 +74,7 @@ async function openConversation(client, channel, phone, name, jid = null) {
       [channel.id, customer.id, phone, name || null, jid],
     )
   ).rows[0];
-  if (conv.inserted) await createLead(client, conv, name || fallbackName);
+  if (conv.inserted) conv.newLead = await createLead(client, conv, name || fallbackName);
   return conv;
 }
 
@@ -83,7 +83,7 @@ async function createLead(client, conv, name) {
   const settings = (
     await client.query('SELECT inbox_auto_lead FROM company_settings WHERE company_id = app_company_id()')
   ).rows[0];
-  if (!settings || !settings.inbox_auto_lead) return;
+  if (!settings || !settings.inbox_auto_lead) return null;
   const open = (
     await client.query(
       `SELECT o.id FROM opportunities o JOIN pipeline_stages s ON s.id = o.stage_id
@@ -92,13 +92,15 @@ async function createLead(client, conv, name) {
     )
   ).rows[0];
   let oppId = open && open.id;
+  let created = null;
   if (!oppId) {
     const stage = (
       await client.query(
-        `SELECT id, name FROM pipeline_stages WHERE active AND kind = 'open' ORDER BY position LIMIT 1`,
+        `SELECT s.id, s.name FROM pipeline_stages s JOIN pipelines p ON p.id = s.pipeline_id
+         WHERE p.is_default AND s.active AND s.kind = 'open' ORDER BY s.position LIMIT 1`,
       )
     ).rows[0];
-    if (!stage) return;
+    if (!stage) return null;
     oppId = (
       await client.query(`INSERT INTO opportunities (title, customer_id, stage_id) VALUES ($1, $2, $3) RETURNING id`, [
         `WhatsApp — ${name}`,
@@ -111,8 +113,10 @@ async function createLead(client, conv, name) {
       `Criada automaticamente por uma conversa no WhatsApp, na etapa "${stage.name}"`,
       JSON.stringify({ action: 'created', via: 'whatsapp', conversation_id: conv.id }),
     ]);
+    created = { opportunityId: oppId, stageId: stage.id };
   }
   await client.query('UPDATE conversations SET opportunity_id = $1 WHERE id = $2', [oppId, conv.id]);
+  return created;
 }
 
 // Grava uma mensagem de qualquer canal. msg = { externalId, phone, jid, contactName, direction ('in' | 'out'),
@@ -156,7 +160,7 @@ async function ingestMessage(channel, msg) {
        WHERE id = $1`,
       [conv.id, sentAt, preview(msg.type, msg.body), msg.contactName || null, msg.jid || null, incoming],
     );
-    return { conversationId: conv.id, isNew };
+    return { conversationId: conv.id, isNew, newLead: conv.newLead || null };
   });
 }
 
@@ -190,8 +194,12 @@ async function updateStatus(externalId, status, error = null) {
 }
 
 // Avisa as telas da empresa (tempo real) sobre o resultado de ingestMessage.
-function announce(result, companyId) {
+function announce(result, companyId = currentCompanyId()) {
   if (!result) return;
+  if (result.newLead) {
+    // Oportunidade criada pela conversa: roda as automações da etapa (carregado aqui para evitar ciclo)
+    require('./automations').onStageEntered({ companyId, ...result.newLead });
+  }
   broadcast(
     'inbox_changed',
     { conversation_id: result.conversationId, new_conversation: result.isNew },

@@ -10,22 +10,14 @@ const { audit } = require('../lib/audit');
 const { broadcast } = require('../lib/realtime');
 const { notify } = require('../lib/notify');
 const { normalizePhone } = require('../lib/util');
-const { preview } = require('../lib/inbox');
 const whatsapp = require('../lib/whatsapp');
 const waweb = require('../lib/waweb');
+const outbox = require('../lib/outbox');
+const { windowInfo } = outbox;
 const { brPhoneVariants } = require('../lib/util');
 
 const router = express.Router();
 router.use(requireAuth);
-
-// A Meta só aceita mensagens livres até 24h após a última mensagem do cliente; depois, só modelos aprovados.
-const WINDOW_MS = 24 * 3600 * 1000;
-const windowInfo = (c) => {
-  // Conexão por QR Code (WhatsApp Web) não tem essa regra
-  if (c.channel_type === 'whatsapp_web') return { window_open: true, window_expires_at: null };
-  const expires = c.last_inbound_at ? new Date(new Date(c.last_inbound_at).getTime() + WINDOW_MS) : null;
-  return { window_open: Boolean(expires && expires > new Date()), window_expires_at: expires };
-};
 
 // Atendente: conversas atribuídas a ele e as sem responsável (fila compartilhada).
 function scopeSql(user, params) {
@@ -36,7 +28,7 @@ function scopeSql(user, params) {
 
 const SELECT = `SELECT c.*, ch.name AS channel_name, ch.display_phone AS channel_phone, ch.status AS channel_status, ch.type AS channel_type,
     u.name AS assignee_name, cu.name AS customer_name, o.title AS opportunity_title, o.value AS opportunity_value,
-    o.stage_id, s.name AS stage_name, s.kind AS stage_kind
+    o.stage_id, s.name AS stage_name, s.kind AS stage_kind, s.pipeline_id
   FROM conversations c JOIN channels ch ON ch.id = c.channel_id
   LEFT JOIN users u ON u.id = c.assignee_id LEFT JOIN customers cu ON cu.id = c.customer_id
   LEFT JOIN opportunities o ON o.id = c.opportunity_id LEFT JOIN pipeline_stages s ON s.id = o.stage_id`;
@@ -49,12 +41,7 @@ async function loadConversation(req, id) {
   return c;
 }
 
-async function loadChannel(conv) {
-  const ch = (await query('SELECT * FROM channels WHERE id = $1', [conv.channel_id])).rows[0];
-  if (!ch || ch.status !== 'connected')
-    throw conflict('O canal de WhatsApp desta conversa está desconectado. Reconecte em Configurações › WhatsApp.');
-  return ch;
-}
+const loadChannel = (conv) => outbox.loadChannel(conv.channel_id);
 
 router.get('/summary', async (req, res, next) => {
   try {
@@ -178,38 +165,15 @@ router.post('/conversations/:id/read', async (req, res, next) => {
   }
 });
 
-// Registra a mensagem como "pendente", envia pela API e atualiza o resultado.
-async function sendOutgoing(req, conv, { type, body, send }) {
+// Quem responde primeiro assume a conversa (evita duas pessoas respondendo o mesmo cliente).
+async function sendOutgoing(req, conv, opts) {
   if (req.user.role === 'atendente' && !conv.assignee_id) {
-    // Quem responde primeiro assume a conversa (evita duas pessoas respondendo o mesmo cliente)
     await query('UPDATE conversations SET assignee_id = $2 WHERE id = $1 AND assignee_id IS NULL', [
       conv.id,
       req.user.id,
     ]);
   }
-  const msg = (
-    await query(
-      `INSERT INTO messages (conversation_id, direction, type, body, status, sender_id)
-       VALUES ($1, 'out', $2, $3, 'pending', $4) RETURNING id`,
-      [conv.id, type, body, req.user.id],
-    )
-  ).rows[0];
-  let waId;
-  try {
-    waId = await send();
-  } catch (err) {
-    await query(`UPDATE messages SET status = 'failed', error = $2 WHERE id = $1`, [msg.id, err.message]);
-    broadcast('inbox_changed', { conversation_id: conv.id });
-    throw err;
-  }
-  await query(`UPDATE messages SET status = 'sent', wa_message_id = $2 WHERE id = $1`, [msg.id, waId]);
-  await query(
-    `UPDATE conversations SET last_message_at = now(), last_message_preview = $2, unread_count = 0,
-       status = 'open', updated_at = now() WHERE id = $1`,
-    [conv.id, preview(type, body)],
-  );
-  broadcast('inbox_changed', { conversation_id: conv.id });
-  return msg.id;
+  return outbox.record(conv, { ...opts, senderId: req.user.id });
 }
 
 router.post(
@@ -219,22 +183,12 @@ router.post(
     try {
       const c = await loadConversation(req, req.params.id);
       const channel = await loadChannel(c);
-      if (!windowInfo(c).window_open) {
-        return next(
-          conflict(
-            'Passaram mais de 24 horas desde a última mensagem do cliente. Pela regra do WhatsApp, envie um modelo aprovado para retomar a conversa.',
-            { requires_template: true },
-          ),
-        );
-      }
-      const id = await sendOutgoing(req, c, {
-        type: 'text',
-        body: req.data.body,
-        send: () =>
-          channel.type === 'whatsapp_web'
-            ? waweb.sendText(channel, c.contact_jid || `${c.contact_phone}@s.whatsapp.net`, req.data.body)
-            : whatsapp.sendText(channel, c.contact_phone, req.data.body),
-      });
+      if (req.user.role === 'atendente' && !c.assignee_id)
+        await query('UPDATE conversations SET assignee_id = $2 WHERE id = $1 AND assignee_id IS NULL', [
+          c.id,
+          req.user.id,
+        ]);
+      const id = await outbox.sendText(c, channel, req.data.body, req.user.id);
       res.status(201).json({ id, message: 'Mensagem enviada.' });
     } catch (err) {
       next(err);

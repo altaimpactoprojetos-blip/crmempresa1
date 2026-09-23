@@ -396,6 +396,7 @@ async function route() {
     return;
   }
   if (!root.querySelector('#app')) renderShell();
+  UI.closeModals();
   const map = {
     '': 'dashboard',
     conversas: 'inbox',
@@ -423,6 +424,18 @@ async function route() {
     content.innerHTML = `<div class="alert danger">${UI.esc(err.message)}</div>`;
   }
 }
+
+// Definições de campos personalizados (em cache até mudarem nas Configurações)
+CRM.loadCustomFields = async (force = false) => {
+  if (!CRM.customFields || force) {
+    const { fields } = await api('/custom-fields');
+    CRM.customFields = {
+      customer: fields.filter((f) => f.entity === 'customer'),
+      opportunity: fields.filter((f) => f.entity === 'opportunity'),
+    };
+  }
+  return CRM.customFields;
+};
 
 CRM.loadUsers = async () => {
   CRM.users = (await api('/users')).users;

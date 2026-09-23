@@ -101,6 +101,9 @@ UI.err = (e) => UI.toast(e instanceof Error ? e.message : String(e), 'error', 60
 UI.empty = (title, text) => `<div class="empty"><strong>${UI.esc(title)}</strong>${text ? UI.esc(text) : ''}</div>`;
 
 // Modal genérico. Retorna { el, close }.
+UI.openModals = new Set();
+// Ao trocar de página, janelas abertas da página anterior são fechadas
+UI.closeModals = () => [...UI.openModals].forEach((close) => close());
 UI.modal = ({ title, body, footer, size = '', onClose }) => {
   const back = document.createElement('div');
   back.className = 'modal-backdrop';
@@ -110,6 +113,7 @@ UI.modal = ({ title, body, footer, size = '', onClose }) => {
     ${footer !== null ? `<div class="modal-footer">${footer || ''}</div>` : ''}
   </div>`;
   const close = () => {
+    UI.openModals.delete(close);
     back.remove();
     document.removeEventListener('keydown', onKey);
     if (onClose) onClose();
@@ -122,6 +126,7 @@ UI.modal = ({ title, body, footer, size = '', onClose }) => {
   });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(back);
+  UI.openModals.add(close);
   const first = back.querySelector('input, select, textarea');
   if (first) setTimeout(() => first.focus(), 30);
   return { el: back, close };
@@ -189,6 +194,12 @@ UI.formData = (form) => {
         : [];
     if (t === 'nullable' && v === '') v = null;
     if (t === 'money') v = v === '' || v === null ? 0 : Number(String(v).replace(/\./g, '').replace(',', '.'));
+    if (el.name.startsWith('custom.')) {
+      // Campos personalizados vão agrupados em { custom: { chave: valor } }
+      out.custom = out.custom || {};
+      out.custom[el.name.slice(7)] = v;
+      continue;
+    }
     out[el.name] = v;
   }
   return out;
@@ -223,6 +234,60 @@ UI.showErrors = (form, err) => {
   }
   if (!Object.keys(fields).length && err) UI.err(err);
 };
+
+// ---------- Campos personalizados ----------
+UI.customInputs = (defs, values = {}) =>
+  defs
+    .map((d) => {
+      const name = `custom.${d.key}`;
+      const v = values ? values[d.key] : null;
+      let input;
+      switch (d.type) {
+        case 'textarea':
+          input = UI.textarea(name, v ?? '', 'rows="3" data-type="nullable"');
+          break;
+        case 'number':
+        case 'money':
+          input = UI.input(
+            name,
+            v ?? '',
+            `inputmode="decimal" data-type="nullable"${d.type === 'money' ? ' placeholder="0,00"' : ''}`,
+          );
+          break;
+        case 'date':
+          input = `<input type="date" name="${name}" value="${UI.attr(v || '')}" data-type="nullable">`;
+          break;
+        case 'select':
+          input = UI.select(name, [['', '—'], ...d.options.map((o) => [o, o])], v ?? '', 'data-type="nullable"');
+          break;
+        case 'checkbox':
+          return `<div class="field"><label class="check"><input type="checkbox" name="${name}" ${v ? 'checked' : ''}> ${UI.esc(d.label)}</label><div class="error"></div></div>`;
+        case 'url':
+          input = UI.input(name, v ?? '', 'type="url" placeholder="https://" data-type="nullable"');
+          break;
+        default:
+          input = UI.input(name, v ?? '', 'data-type="nullable"');
+      }
+      return UI.field(name, d.label, input, { required: d.required });
+    })
+    .join('');
+
+UI.customValue = (d, v) => {
+  if (v == null || v === '') return '—';
+  if (d.type === 'checkbox') return v ? 'Sim' : 'Não';
+  if (d.type === 'money') return UI.fmtMoney(v);
+  if (d.type === 'number') return Number(v).toLocaleString('pt-BR');
+  if (d.type === 'date') return UI.fmtDate(`${v}T12:00:00`);
+  if (d.type === 'url') return `<a href="${UI.attr(v)}" target="_blank" rel="noopener noreferrer">${UI.esc(v)}</a>`;
+  return UI.esc(v);
+};
+
+// Linhas de tabela (<tr>) com os valores preenchidos
+UI.customRows = (defs, values = {}) =>
+  defs
+    .filter((d) => values && values[d.key] != null && values[d.key] !== '')
+    .map((d) => `<tr><th>${UI.esc(d.label)}</th><td>${UI.customValue(d, values[d.key])}</td></tr>`)
+    .join('');
 
 UI.field = (name, label, input, { required = false, hint = '' } = {}) =>
   `<div class="field"><label>${UI.esc(label)}${required ? ' <span class="req">*</span>' : ''}</label>${input}${hint ? `<div class="hint">${UI.esc(hint)}</div>` : ''}<div class="error"></div></div>`;

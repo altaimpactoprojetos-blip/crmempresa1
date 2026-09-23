@@ -2,7 +2,7 @@
 
 CRM de nível intermediário para equipes de atendimento de até ~10 pessoas trabalhando simultaneamente. Interface em português do Brasil, backend próprio em Node.js e banco PostgreSQL.
 
-**Módulos:** Dashboard · Clientes · Atendimentos (fila, protocolo, rodízio) · Funil comercial (Kanban) · Tarefas e retornos · Relatórios · Configurações (identidade visual, usuários, funil, integrações, backup, auditoria).
+**Módulos:** Dashboard · Clientes · Atendimentos (fila, protocolo, rodízio) · Funis comerciais (Kanban, vários por empresa) · Campos personalizados · Automações do funil · Tarefas e retornos · Relatórios · Configurações (identidade visual, usuários, funil, integrações, backup, auditoria).
 
 ## Requisitos
 
@@ -83,6 +83,12 @@ A conexão por QR usa a biblioteca de código aberto [Baileys](https://github.co
 
 Sem número conectado, nada é enviado nem simulado; o botão do cliente oferece abrir o WhatsApp no aplicativo.
 
+## Funis, campos personalizados e automações
+
+- **Vários funis** por empresa (ex.: vendas, pós-venda, parcerias), cada um com as suas etapas, em **Configurações › Funis**. O funil **principal** recebe os contatos novos do WhatsApp. No quadro, cada funil vira uma aba.
+- **Campos personalizados** para clientes e oportunidades (texto, número, valor, data, lista, sim/não, link), em **Configurações › Campos personalizados**. Aparecem nos formulários e nas fichas. Excluir um campo só o tira dos formulários; os valores ficam guardados.
+- **Automações**: quando uma oportunidade entra em uma etapa, rodam em ordem as ações configuradas: criar tarefa, enviar WhatsApp, definir responsável (fixo ou por rodízio), adicionar etiqueta ao cliente e avisar um usuário. Os textos aceitam `{nome}`, `{primeiro_nome}`, `{oportunidade}`, `{valor}`, `{etapa}`, `{responsavel}` e `{empresa}`. Cada execução fica no **Histórico**, com o resultado de cada ação.
+
 ## Segurança
 
 Senhas com bcrypt (custo 12) · sessões em PostgreSQL com cookie `HttpOnly`/`SameSite` · cabeçalho anti-CSRF obrigatório em requisições mutáveis · limitação de tentativas de login · validação de dados no servidor (zod) · registro de auditoria das ações importantes · controle de versão otimista (evita sobrescrever alterações simultâneas) · credenciais somente em variáveis de ambiente (`.env` não versionado) · cabeçalhos de segurança e CSP (helmet).
@@ -134,10 +140,12 @@ src/
   migrations/*.sql         # esquema do banco (aplicado por npm run migrate)
   routes/index.js          # registro central das rotas /api
   routes/<módulo>.js       # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications,
-                           # inbox (conversas), channels (WhatsApp), quickReplies, webhooks
+                           # inbox (conversas), channels (WhatsApp), quickReplies, webhooks,
+                           # pipelines (funis), customFields, automations
   middleware/              # security, session, csrf, auth, validate, errorHandler
   lib/                     # errors, audit, notify, realtime, mailer, timezone, util, companies,
-                           # inbox (mensagens recebidas), whatsapp (API da Meta), waweb (QR Code), crypto
+                           # inbox (mensagens recebidas), outbox (envio), whatsapp (API da Meta), waweb (QR Code),
+                           # crypto, customFields (validação), automations (execução)
 public/                    # frontend (SPA sem build): index.html, css/, js/api.js, js/ui.js, js/pages/, js/app.js
 scripts/                   # migrate, create-admin, seed-demo, backup.sh, restore.sh
 tests/                     # testes de integração (node:test)

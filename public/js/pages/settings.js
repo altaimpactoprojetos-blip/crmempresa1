@@ -7,7 +7,9 @@ CRM.pages.settings = {
     const tabs = [
       ['empresa', 'Empresa'],
       ['usuarios', 'Usuários'],
-      ['funil', 'Funil'],
+      ['funil', 'Funis'],
+      ['campos', 'Campos personalizados'],
+      ['automacoes', 'Automações'],
       ['whatsapp', 'WhatsApp'],
       ['respostas', 'Respostas rápidas'],
       ['canais', 'Canais e origens'],
@@ -17,7 +19,16 @@ CRM.pages.settings = {
     ];
     const visible = CRM.isAdmin()
       ? tabs
-      : tabs.filter(([k]) => ['respostas', 'integracoes', 'auditoria', 'funil'].includes(k));
+      : tabs.filter(([k]) =>
+          [
+            'respostas',
+            'integracoes',
+            'auditoria',
+            'funil',
+            'campos',
+            ...(CRM.isManager() ? ['automacoes'] : []),
+          ].includes(k),
+        );
     this.tab = sub && visible.some(([k]) => k === sub) ? sub : visible[0][0];
     el.innerHTML =
       CRM.pageHeader(
@@ -206,9 +217,14 @@ CRM.pages.settings = {
     };
   },
 
-  funil(box) {
-    const stages = this.data.stages.filter((s) => s.active);
+  // ---------- Funis e etapas ----------
+  async funil(box) {
+    const pipelines = (await api('/pipelines')).pipelines;
     const ro = !CRM.isAdmin();
+    if (!pipelines.some((p) => p.id === this.pipelineSel))
+      this.pipelineSel = (pipelines.find((p) => p.is_default) || pipelines[0]).id;
+    const current = pipelines.find((p) => p.id === this.pipelineSel);
+    const stages = current.stages.filter((s) => s.active);
     const row = (s = { name: '', kind: 'open' }) =>
       `<tr data-id="${s.id || ''}"><td><input name="name" value="${UI.attr(s.name)}" required ${ro ? 'readonly' : ''}></td><td>${UI.select(
         'kind',
@@ -220,10 +236,51 @@ CRM.pages.settings = {
         s.kind,
         ro ? 'disabled' : '',
       )}</td><td class="nowrap">${ro ? '' : '<button type="button" class="icon-btn" data-up>↑</button><button type="button" class="icon-btn" data-down>↓</button><button type="button" class="icon-btn" data-rm title="Remover">🗑</button>'}</td></tr>`;
-    box.innerHTML = `<div class="card"><h3>Etapas do funil</h3><p class="muted small">Ordene as etapas; é obrigatório ter exatamente uma etapa "Ganho" e uma "Perdido". Etapas removidas que já possuem oportunidades ficam apenas ocultas.</p>
+    box.innerHTML = `<div class="card"><div class="flex between wrap"><div><h3>Funis</h3><p class="muted small">Separe processos diferentes (ex.: vendas, pós-venda, parcerias). O funil <b>principal</b> recebe os contatos novos do WhatsApp.</p></div>
+      ${ro ? '' : '<button class="btn sm" id="newPipe">+ Novo funil</button>'}</div>
+      <div class="tabs" id="pipeSel">${pipelines.map((p) => `<button data-id="${p.id}" class="${p.id === current.id ? 'active' : ''}">${UI.esc(p.name)}${p.is_default ? ' <span class="badge primary">principal</span>' : ''}</button>`).join('')}</div>
+      ${ro ? '' : `<div class="flex wrap"><button class="btn secondary sm" id="renPipe">Renomear</button>${current.is_default ? '' : '<button class="btn secondary sm" id="defPipe">Tornar principal</button><button class="btn ghost sm" id="delPipe">Excluir funil</button>'}</div>`}</div>
+      <div class="card"><h3>Etapas de "${UI.esc(current.name)}"</h3><p class="muted small">Ordene as etapas; é obrigatório ter exatamente uma etapa "Ganho" e uma "Perdido". Etapas removidas que já possuem oportunidades ficam apenas ocultas.</p>
       <form id="stForm"><table><thead><tr><th>Nome</th><th>Tipo</th><th></th></tr></thead><tbody id="stBody">${stages.map(row).join('')}</tbody></table>
       ${ro ? '' : '<div class="flex between mt"><button type="button" class="btn secondary sm" id="addSt">+ Adicionar etapa</button><button class="btn">Salvar etapas</button></div>'}</form></div>`;
+    box.querySelector('#pipeSel').onclick = (e) => {
+      const b = e.target.closest('button[data-id]');
+      if (!b) return;
+      this.pipelineSel = Number(b.dataset.id);
+      this.funil(box);
+    };
     if (ro) return;
+    const call = async (fn) => {
+      try {
+        const r = await fn();
+        if (r) UI.ok(r.message);
+        this.funil(box);
+      } catch (err) {
+        UI.err(err);
+      }
+    };
+    box.querySelector('#newPipe').onclick = async () => {
+      const name = await UI.prompt('Nome do novo funil', { title: 'Novo funil', placeholder: 'ex.: Pós-venda' });
+      if (!name) return;
+      call(async () => {
+        const r = await api('/pipelines', { method: 'POST', body: { name } });
+        this.pipelineSel = r.pipeline.id;
+        return r;
+      });
+    };
+    box.querySelector('#renPipe').onclick = async () => {
+      const name = await UI.prompt('Novo nome do funil', { title: 'Renomear funil', placeholder: current.name });
+      if (name) call(() => api(`/pipelines/${current.id}`, { method: 'PUT', body: { name } }));
+    };
+    const def = box.querySelector('#defPipe');
+    if (def)
+      def.onclick = () => call(() => api(`/pipelines/${current.id}`, { method: 'PUT', body: { is_default: true } }));
+    const del = box.querySelector('#delPipe');
+    if (del)
+      del.onclick = async () => {
+        if (await UI.confirm(`Excluir o funil "${current.name}" e suas etapas?`, { danger: true, okLabel: 'Excluir' }))
+          call(() => api(`/pipelines/${current.id}`, { method: 'DELETE' }));
+      };
     const body = box.querySelector('#stBody');
     box.querySelector('#addSt').onclick = () => body.insertAdjacentHTML('beforeend', row());
     body.onclick = (e) => {
@@ -233,22 +290,334 @@ CRM.pages.settings = {
       if (e.target.closest('[data-up]') && tr.previousElementSibling) tr.previousElementSibling.before(tr);
       if (e.target.closest('[data-down]') && tr.nextElementSibling) tr.nextElementSibling.after(tr);
     };
-    box.querySelector('#stForm').onsubmit = async (e) => {
+    box.querySelector('#stForm').onsubmit = (e) => {
       e.preventDefault();
       const list = [...body.querySelectorAll('tr')].map((tr) => ({
         id: tr.dataset.id ? Number(tr.dataset.id) : undefined,
         name: tr.querySelector('[name=name]').value.trim(),
         kind: tr.querySelector('[name=kind]').value,
       }));
-      try {
-        const r = await api('/settings/stages', { method: 'PUT', body: { stages: list } });
-        UI.ok(r.message);
-        this.data.stages = r.stages;
-        this.funil(box);
-      } catch (err) {
-        UI.err(err);
+      call(() => api('/settings/stages', { method: 'PUT', body: { pipeline_id: current.id, stages: list } }));
+    };
+  },
+
+  // ---------- Campos personalizados ----------
+  async campos(box) {
+    const { fields } = await api('/custom-fields');
+    const ro = !CRM.isAdmin();
+    const typeLabels = {
+      text: 'Texto',
+      textarea: 'Texto longo',
+      number: 'Número',
+      money: 'Valor (R$)',
+      date: 'Data',
+      select: 'Lista de opções',
+      checkbox: 'Sim/Não',
+      url: 'Link',
+    };
+    const table = (entity, title) => {
+      const list = fields.filter((f) => f.entity === entity);
+      return `<div class="card"><div class="flex between"><h3>${title}</h3>${ro ? '' : `<button class="btn sm" data-new="${entity}">+ Novo campo</button>`}</div>
+        ${
+          list.length
+            ? `<div class="table-wrap"><table><thead><tr><th>Campo</th><th>Tipo</th><th>Obrigatório</th>${ro ? '' : '<th></th>'}</tr></thead><tbody>${list
+                .map(
+                  (f) =>
+                    `<tr><td>${UI.esc(f.label)} <span class="muted small mono">${UI.esc(f.key)}</span></td><td>${typeLabels[f.type]}${f.type === 'select' ? `<div class="muted small">${UI.esc(f.options.join(', '))}</div>` : ''}</td><td>${f.required ? 'Sim' : 'Não'}</td>${ro ? '' : `<td class="nowrap"><button class="btn ghost sm" data-edit="${f.id}">Editar</button><button class="btn ghost sm" data-del="${f.id}">Excluir</button></td>`}</tr>`,
+                )
+                .join('')}</tbody></table></div>`
+            : UI.empty('Nenhum campo personalizado', 'Crie campos para guardar informações específicas do seu negócio.')
+        }</div>`;
+    };
+    box.innerHTML = `<p class="muted small">Campos extras aparecem nos formulários e na ficha do cliente e da oportunidade. Excluir um campo só o remove dos formulários: os valores já preenchidos continuam guardados.</p>
+      <div class="grid cols-2">${table('customer', 'Clientes')}${table('opportunity', 'Oportunidades')}</div>`;
+    if (ro) return;
+    const done = async () => {
+      await CRM.loadCustomFields(true);
+      this.campos(box);
+    };
+    box.onclick = async (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.new) this.fieldForm({ entity: b.dataset.new }, typeLabels, done);
+      if (b.dataset.edit)
+        this.fieldForm(
+          fields.find((f) => f.id === Number(b.dataset.edit)),
+          typeLabels,
+          done,
+        );
+      if (b.dataset.del) {
+        const f = fields.find((x) => x.id === Number(b.dataset.del));
+        if (!(await UI.confirm(`Remover o campo "${f.label}" dos formulários?`, { danger: true, okLabel: 'Remover' })))
+          return;
+        try {
+          UI.ok((await api(`/custom-fields/${f.id}`, { method: 'DELETE' })).message);
+          done();
+        } catch (err) {
+          UI.err(err);
+        }
       }
     };
+  },
+
+  fieldForm(f, typeLabels, done) {
+    const isEdit = Boolean(f.id);
+    const m = UI.modal({
+      title: isEdit ? 'Editar campo' : `Novo campo de ${f.entity === 'customer' ? 'cliente' : 'oportunidade'}`,
+      size: 'narrow',
+      body: `<form id="cfForm">${UI.field('label', 'Nome do campo', UI.input('label', f.label, 'required maxlength="60" placeholder="ex.: Data de aniversário"'), { required: true })}
+        ${UI.field('type', 'Tipo', UI.select('type', Object.entries(typeLabels), f.type || 'text', isEdit ? 'disabled' : ''))}
+        <div id="optBox">${UI.field('options', 'Opções (uma por linha)', UI.textarea('options', (f.options || []).join('\n'), 'rows="4"'))}</div>
+        <label class="check"><input type="checkbox" name="required" ${f.required ? 'checked' : ''}> Preenchimento obrigatório</label></form>`,
+      footer: `<button class="btn secondary" data-close>Cancelar</button><button class="btn" type="submit" form="cfForm">Salvar</button>`,
+    });
+    const form = m.el.querySelector('#cfForm');
+    const sync = () => (m.el.querySelector('#optBox').hidden = form.type.value !== 'select');
+    form.type.onchange = sync;
+    sync();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = {
+        label: form.label.value.trim(),
+        required: form.required.checked,
+        options: form.options.value
+          .split('\n')
+          .map((x) => x.trim())
+          .filter(Boolean),
+      };
+      if (!isEdit) Object.assign(body, { entity: f.entity, type: form.type.value });
+      try {
+        const r = isEdit
+          ? await api(`/custom-fields/${f.id}`, { method: 'PUT', body })
+          : await api('/custom-fields', { method: 'POST', body });
+        UI.ok(r.message);
+        m.close();
+        done();
+      } catch (err) {
+        UI.showErrors(form, err);
+      }
+    };
+  },
+
+  // ---------- Automações ----------
+  async automacoes(box) {
+    const [{ automations }, { pipelines }] = await Promise.all([api('/automations'), api('/pipelines')]);
+    const ro = !CRM.isAdmin();
+    const statusBadge = (st) =>
+      ({
+        ok: '<span class="badge success">ok</span>',
+        partial: '<span class="badge warning">parcial</span>',
+        error: '<span class="badge danger">erro</span>',
+      })[st] || '';
+    box.innerHTML = `<div class="card"><div class="flex between wrap"><div><h3>Automações do funil</h3><p class="muted small">Quando uma oportunidade entra em uma etapa, as ações configuradas rodam sozinhas: criar tarefa, mandar WhatsApp, definir responsável (inclusive por rodízio), marcar o cliente ou avisar alguém.</p></div>
+      ${ro ? '' : '<button class="btn sm" id="newAut">+ Nova automação</button>'}</div>
+      ${
+        automations.length
+          ? `<div class="table-wrap"><table><thead><tr><th>Nome</th><th>Quando entrar em</th><th>Ações</th><th>Última execução</th><th>Situação</th><th></th></tr></thead><tbody>${automations
+              .map(
+                (a) =>
+                  `<tr><td><b>${UI.esc(a.name)}</b></td><td>${pipelines.length > 1 ? `<span class="muted small">${UI.esc(a.pipeline_name)} ›</span> ` : ''}${UI.esc(a.stage_name)}</td>
+                  <td class="small">${a.actions.map((x) => UI.esc(this.actionLabels[x.type])).join(', ')}</td>
+                  <td class="small">${a.last_run ? `${statusBadge(a.last_run.status)} ${UI.fmtDateTime(a.last_run.created_at)}` : '<span class="muted">nunca</span>'}</td>
+                  <td>${a.active ? '<span class="badge success">ativa</span>' : '<span class="badge">pausada</span>'}</td>
+                  <td class="nowrap"><button class="btn ghost sm" data-runs="${a.id}">Histórico</button>${ro ? '' : `<button class="btn ghost sm" data-edit="${a.id}">Editar</button><button class="btn ghost sm" data-del="${a.id}">Excluir</button>`}</td></tr>`,
+              )
+              .join('')}</tbody></table></div>`
+          : UI.empty(
+              'Nenhuma automação',
+              ro
+                ? 'Peça a um administrador para criar.'
+                : 'Crie a primeira: ex.: ao entrar em "Proposta", criar tarefa de follow-up em 2 dias.',
+            )
+      }</div>`;
+    const reload = () => this.automacoes(box);
+    const nb = box.querySelector('#newAut');
+    if (nb) nb.onclick = () => this.automationForm(null, pipelines, reload);
+    box.onclick = async (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const a = automations.find((x) => x.id === Number(b.dataset.runs || b.dataset.edit || b.dataset.del));
+      if (!a) return;
+      if (b.dataset.runs) this.automationRuns(a, statusBadge);
+      if (b.dataset.edit) this.automationForm(a, pipelines, reload);
+      if (b.dataset.del) {
+        if (!(await UI.confirm(`Excluir a automação "${a.name}"?`, { danger: true, okLabel: 'Excluir' }))) return;
+        try {
+          UI.ok((await api(`/automations/${a.id}`, { method: 'DELETE' })).message);
+          reload();
+        } catch (err) {
+          UI.err(err);
+        }
+      }
+    };
+  },
+
+  actionLabels: {
+    create_task: 'Criar tarefa',
+    send_whatsapp: 'Enviar WhatsApp',
+    set_owner: 'Definir responsável',
+    add_tag: 'Adicionar etiqueta ao cliente',
+    notify: 'Avisar usuário',
+  },
+
+  // Campos de cada tipo de ação (data-k = propriedade enviada à API)
+  actionFields(a) {
+    const users = (CRM.users || []).filter((u) => u.active);
+    const who = (k, v, extra = []) =>
+      UI.select(
+        k,
+        [
+          ['owner', 'Responsável pela oportunidade'],
+          ['actor', 'Quem moveu o cartão'],
+          ...extra,
+          ...users.map((u) => [u.id, u.name]),
+        ],
+        v,
+        `data-k="${k}" data-int-or-str`,
+      );
+    switch (a.type) {
+      case 'create_task':
+        return `<div class="form-row cols-3">${UI.field('title', 'Título da tarefa', UI.input('title', a.title, 'data-k="title" placeholder="ex.: Ligar para {primeiro_nome}"'))}
+          ${UI.field('due_in_hours', 'Prazo (horas)', `<input type="number" min="0" max="8760" data-k="due_in_hours" value="${UI.attr(a.due_in_hours ?? 24)}">`)}
+          ${UI.field('assignee', 'Para', who('assignee', a.assignee ?? 'owner', [['none', 'Ninguém']]))}</div>`;
+      case 'send_whatsapp':
+        return UI.field(
+          'text',
+          'Mensagem',
+          `<textarea data-k="text" rows="3" placeholder="Olá {primeiro_nome}, ...">${UI.esc(a.text || '')}</textarea>`,
+        );
+      case 'set_owner':
+        return UI.field(
+          'user_id',
+          'Novo responsável',
+          UI.select(
+            'user_id',
+            [['round_robin', 'Rodízio entre atendentes disponíveis'], ...users.map((u) => [u.id, u.name])],
+            a.user_id ?? 'round_robin',
+            'data-k="user_id" data-int-or-str',
+          ),
+        );
+      case 'add_tag':
+        return UI.field('tag', 'Etiqueta', UI.input('tag', a.tag, 'data-k="tag" placeholder="ex.: proposta-enviada"'));
+      case 'notify':
+        return `<div class="form-row">${UI.field('user', 'Avisar', who('user', a.user ?? 'owner'))}${UI.field('text', 'Aviso', UI.input('text', a.text, 'data-k="text" placeholder="ex.: {oportunidade} chegou em {etapa}"'))}</div>`;
+      default:
+        return '';
+    }
+  },
+
+  automationForm(a, pipelines, done) {
+    const isEdit = Boolean(a);
+    const actions = a ? a.actions.map((x) => ({ ...x })) : [{ type: 'create_task' }];
+    const stageOptions = pipelines
+      .map(
+        (p) =>
+          `<optgroup label="${UI.attr(p.name)}">${p.stages
+            .filter((s) => s.active)
+            .map(
+              (s) => `<option value="${s.id}" ${a && a.stage_id === s.id ? 'selected' : ''}>${UI.esc(s.name)}</option>`,
+            )
+            .join('')}</optgroup>`,
+      )
+      .join('');
+    const m = UI.modal({
+      title: isEdit ? 'Editar automação' : 'Nova automação',
+      size: 'wide',
+      body: `<form id="autForm"><div class="form-row">${UI.field('name', 'Nome', UI.input('name', a?.name, 'required placeholder="ex.: Follow-up de proposta"'), { required: true })}
+        ${UI.field('stage_id', 'Quando a oportunidade entrar na etapa', `<select name="stage_id" data-type="int" required>${stageOptions}</select>`, { required: true })}</div>
+        <label class="check"><input type="checkbox" name="active" ${!a || a.active ? 'checked' : ''}> Automação ativa</label>
+        <h4 class="mt">Ações (executadas em ordem)</h4><div id="actList"></div>
+        <button type="button" class="btn secondary sm" id="addAct">+ Adicionar ação</button>
+        <p class="muted small mt">Variáveis nos textos: {nome}, {primeiro_nome}, {oportunidade}, {valor}, {etapa}, {responsavel}, {empresa}. "Enviar WhatsApp" usa a conversa do cliente em um número conectado (no WhatsApp oficial, fora da janela de 24h, a Meta exige modelo aprovado).</p></form>`,
+      footer: `<button class="btn secondary" data-close>Cancelar</button><button class="btn" type="submit" form="autForm">Salvar</button>`,
+    });
+    const form = m.el.querySelector('#autForm');
+    const list = m.el.querySelector('#actList');
+    // Lê os valores digitados antes de redesenhar a lista
+    const read = () =>
+      [...list.querySelectorAll('.action-row')].map((row) => {
+        const out = { type: row.querySelector('[data-type-sel]').value };
+        row.querySelectorAll('[data-k]').forEach((el) => {
+          let v = el.value.trim();
+          if (el.type === 'number') v = v === '' ? undefined : Number(v);
+          else if (el.hasAttribute('data-int-or-str') && /^\d+$/.test(v)) v = Number(v);
+          out[el.dataset.k] = v;
+        });
+        return out;
+      });
+    const draw = () => {
+      list.innerHTML = actions
+        .map(
+          (x, i) =>
+            `<div class="action-row card" data-i="${i}"><div class="flex between"><select data-type-sel style="width:auto">${Object.entries(
+              this.actionLabels,
+            )
+              .map(([k, l]) => `<option value="${k}" ${k === x.type ? 'selected' : ''}>${l}</option>`)
+              .join(
+                '',
+              )}</select>${actions.length > 1 ? '<button type="button" class="icon-btn" data-rm title="Remover ação">🗑</button>' : ''}</div>${this.actionFields(x)}</div>`,
+        )
+        .join('');
+    };
+    draw();
+    list.onchange = (e) => {
+      if (!e.target.matches('[data-type-sel]')) return;
+      const i = Number(e.target.closest('.action-row').dataset.i);
+      actions.splice(0, actions.length, ...read());
+      actions[i] = { type: e.target.value };
+      draw();
+    };
+    list.onclick = (e) => {
+      if (!e.target.closest('[data-rm]')) return;
+      const i = Number(e.target.closest('.action-row').dataset.i);
+      actions.splice(0, actions.length, ...read());
+      actions.splice(i, 1);
+      draw();
+    };
+    m.el.querySelector('#addAct').onclick = () => {
+      actions.splice(0, actions.length, ...read());
+      if (actions.length >= 10) return UI.err(new Error('Máximo de 10 ações por automação.'));
+      actions.push({ type: 'notify' });
+      draw();
+    };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = {
+        name: form.name.value.trim(),
+        stage_id: Number(form.stage_id.value),
+        active: form.active.checked,
+        actions: read(),
+      };
+      try {
+        const r = isEdit
+          ? await api(`/automations/${a.id}`, { method: 'PUT', body })
+          : await api('/automations', { method: 'POST', body });
+        UI.ok(r.message);
+        m.close();
+        done();
+      } catch (err) {
+        UI.showErrors(form, err);
+        if (!err.data?.fields) UI.err(err);
+      }
+    };
+  },
+
+  async automationRuns(a, statusBadge) {
+    const { runs } = await api(`/automations/${a.id}/runs`);
+    UI.modal({
+      title: `Histórico — ${a.name}`,
+      size: 'wide',
+      body: runs.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Quando</th><th>Oportunidade</th><th>Resultado</th><th>Detalhes</th></tr></thead><tbody>${runs
+            .map(
+              (r) =>
+                `<tr><td class="nowrap small">${UI.fmtDateTime(r.created_at)}</td><td>${r.opportunity_id ? `<a href="#/funil/${r.opportunity_id}">${UI.esc(r.opportunity_title || '#' + r.opportunity_id)}</a>` : '—'}</td><td>${statusBadge(r.status)}</td>
+                <td class="small">${r.detail.map((d) => `<div>${d.ok ? '✓' : '✗'} ${UI.esc(this.actionLabels[d.type] || d.type)}${d.error ? ` — <span class="text-danger">${UI.esc(d.error)}</span>` : ''}</div>`).join('')}</td></tr>`,
+            )
+            .join('')}</tbody></table></div>`
+        : UI.empty('Nenhuma execução ainda', 'Mova uma oportunidade para a etapa para disparar a automação.'),
+      footer: '<button class="btn secondary" data-close>Fechar</button>',
+    });
   },
 
   canais(box) {

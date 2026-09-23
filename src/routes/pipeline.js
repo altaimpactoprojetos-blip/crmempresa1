@@ -9,6 +9,8 @@ const { audit } = require('../lib/audit');
 const { broadcast } = require('../lib/realtime');
 const { notify } = require('../lib/notify');
 const { toCsv } = require('../lib/util');
+const customFields = require('../lib/customFields');
+const automations = require('../lib/automations');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -19,8 +21,21 @@ function scopeSql(user, params) {
   return `(o.owner_id = $${params.length} OR o.owner_id IS NULL)`;
 }
 
-const SELECT = `SELECT o.*, c.name AS customer_name, c.phone AS customer_phone, c.company AS customer_company, u.name AS owner_name, s.name AS stage_name, s.kind AS stage_kind
-  FROM opportunities o JOIN customers c ON c.id = o.customer_id LEFT JOIN users u ON u.id = o.owner_id JOIN pipeline_stages s ON s.id = o.stage_id`;
+const SELECT = `SELECT o.*, c.name AS customer_name, c.phone AS customer_phone, c.company AS customer_company, u.name AS owner_name,
+    s.name AS stage_name, s.kind AS stage_kind, s.pipeline_id, p.name AS pipeline_name
+  FROM opportunities o JOIN customers c ON c.id = o.customer_id LEFT JOIN users u ON u.id = o.owner_id
+  JOIN pipeline_stages s ON s.id = o.stage_id JOIN pipelines p ON p.id = s.pipeline_id`;
+
+// Funil informado ou o padrão da empresa
+async function resolvePipeline(id, client) {
+  const q = client ? client.query.bind(client) : query;
+  const { rows } = await q(
+    id ? 'SELECT * FROM pipelines WHERE id = $1' : 'SELECT * FROM pipelines WHERE is_default LIMIT 1',
+    id ? [Number(id)] : [],
+  );
+  if (!rows[0]) throw badRequest('Funil não encontrado.');
+  return rows[0];
+}
 
 async function load(req, id, client) {
   const q = client ? client.query.bind(client) : query;
@@ -35,6 +50,8 @@ const schema = z.object({
   customer_id: z.number().int().positive(),
   owner_id: z.number().int().positive().nullable().optional(),
   stage_id: z.number().int().positive().optional(),
+  pipeline_id: z.number().int().positive().optional(),
+  custom: z.record(z.any()).optional(),
   value: z.number().min(0).max(1e12).default(0),
   next_action: z.string().trim().max(300).nullable().optional(),
   next_action_at: z.string().datetime({ offset: true }).nullable().optional(),
@@ -66,11 +83,19 @@ router.get('/', async (req, res, next) => {
       );
     }
     if (req.query.open === 'true') where.push(`s.kind = 'open'`);
+    const pipeline = await resolvePipeline(req.query.pipeline_id);
+    if (req.query.pipeline_id) {
+      params.push(pipeline.id);
+      where.push(`s.pipeline_id = $${params.length}`);
+    }
     if (req.query.closed_from) {
       params.push(req.query.closed_from);
       where.push(`o.closed_at >= $${params.length}::timestamptz`);
     }
-    const stages = await query('SELECT * FROM pipeline_stages WHERE active ORDER BY position');
+    const stages = await query('SELECT * FROM pipeline_stages WHERE active AND pipeline_id = $1 ORDER BY position', [
+      pipeline.id,
+    ]);
+    const pipelines = await query('SELECT id, name, is_default FROM pipelines ORDER BY position, id');
     const { rows } = await query(
       `${SELECT} WHERE ${where.join(' AND ')} ORDER BY o.updated_at DESC LIMIT 1000`,
       params,
@@ -81,7 +106,7 @@ router.get('/', async (req, res, next) => {
       req.query.all === 'true'
         ? rows
         : rows.filter((o) => o.stage_kind === 'open' || !o.closed_at || new Date(o.closed_at).getTime() >= cutoff);
-    res.json({ stages: stages.rows, opportunities: list });
+    res.json({ pipeline, pipelines: pipelines.rows, stages: stages.rows, opportunities: list });
   } catch (err) {
     next(err);
   }
@@ -141,17 +166,25 @@ router.post('/', validate(schema), async (req, res, next) => {
       const cust = await client.query('SELECT id FROM customers WHERE id = $1', [d.customer_id]);
       if (!cust.rowCount) throw badRequest('Cliente não encontrado.', { fields: { customer_id: 'Cliente inválido.' } });
       let stageId = d.stage_id;
-      if (!stageId)
-        stageId = (
-          await client.query(`SELECT id FROM pipeline_stages WHERE active AND kind = 'open' ORDER BY position LIMIT 1`)
-        ).rows[0].id;
+      if (!stageId) {
+        const pipeline = await resolvePipeline(d.pipeline_id, client);
+        const first = (
+          await client.query(
+            `SELECT id FROM pipeline_stages WHERE active AND kind = 'open' AND pipeline_id = $1 ORDER BY position LIMIT 1`,
+            [pipeline.id],
+          )
+        ).rows[0];
+        if (!first) throw badRequest('Este funil não tem etapa aberta.');
+        stageId = first.id;
+      }
+      const custom = await customFields.clean('opportunity', d.custom, { client });
       const stage = (await client.query('SELECT * FROM pipeline_stages WHERE id = $1 AND active', [stageId])).rows[0];
       if (!stage) throw badRequest('Etapa inválida.');
       if (stage.kind !== 'open') throw badRequest('Crie a oportunidade em uma etapa aberta.');
       const ownerId = d.owner_id === undefined ? req.user.id : d.owner_id;
       const { rows } = await client.query(
-        `INSERT INTO opportunities (title, customer_id, owner_id, stage_id, value, next_action, next_action_at, expected_close_date, ticket_id, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+        `INSERT INTO opportunities (title, customer_id, owner_id, stage_id, value, next_action, next_action_at, expected_close_date, ticket_id, created_by, custom)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
         [
           d.title,
           d.customer_id,
@@ -163,6 +196,7 @@ router.post('/', validate(schema), async (req, res, next) => {
           d.expected_close_date || null,
           d.ticket_id || null,
           req.user.id,
+          JSON.stringify(custom),
         ],
       );
       await client.query(
@@ -178,6 +212,12 @@ router.post('/', validate(schema), async (req, res, next) => {
       return rows[0];
     });
     broadcast('pipeline_changed', { id: out.id });
+    automations.onStageEntered({
+      companyId: req.user.company_id,
+      opportunityId: out.id,
+      stageId: out.stage_id,
+      actorId: req.user.id,
+    });
     res.status(201).json({ opportunity: out, message: 'Oportunidade criada.' });
   } catch (err) {
     next(err);
@@ -198,10 +238,12 @@ router.put('/:id', validate(schema.partial()), async (req, res, next) => {
       );
     if (d.stage_id !== undefined && d.stage_id !== o.stage_id)
       return next(badRequest('Use a ação "mover etapa" para alterar a etapa.'));
+    const custom = await customFields.clean('opportunity', d.custom, { partial: true });
     const { rows } = await query(
       `UPDATE opportunities SET title = COALESCE($1, title), owner_id = CASE WHEN $2::boolean THEN $3 ELSE owner_id END, value = COALESCE($4, value),
         next_action = CASE WHEN $5::boolean THEN $6 ELSE next_action END, next_action_at = CASE WHEN $7::boolean THEN $8 ELSE next_action_at END,
-        expected_close_date = CASE WHEN $9::boolean THEN $10 ELSE expected_close_date END, version = version + 1, updated_at = now() WHERE id = $11 RETURNING *`,
+        expected_close_date = CASE WHEN $9::boolean THEN $10 ELSE expected_close_date END,
+        custom = custom || COALESCE($12::jsonb, '{}'::jsonb), version = version + 1, updated_at = now() WHERE id = $11 RETURNING *`,
       [
         d.title ?? null,
         d.owner_id !== undefined,
@@ -214,6 +256,7 @@ router.put('/:id', validate(schema.partial()), async (req, res, next) => {
         d.expected_close_date !== undefined,
         d.expected_close_date ?? null,
         o.id,
+        custom ? JSON.stringify(custom) : null,
       ],
     );
     if (d.owner_id !== undefined && d.owner_id !== o.owner_id && d.owner_id)
@@ -285,9 +328,17 @@ router.post(
           { from: o.stage_id, to: stage.id, kind: stage.kind },
           client,
         );
-        return rows[0];
+        return { ...rows[0], moved: true };
       });
       broadcast('pipeline_changed', { id });
+      if (out.moved)
+        automations.onStageEntered({
+          companyId: req.user.company_id,
+          opportunityId: id,
+          stageId: out.stage_id,
+          actorId: req.user.id,
+        });
+      delete out.moved;
       res.json({ opportunity: out, message: 'Etapa atualizada.' });
     } catch (err) {
       next(err);
