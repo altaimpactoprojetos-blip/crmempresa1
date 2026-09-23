@@ -1,5 +1,22 @@
 # Guia de instalação e operação
 
+## Instalação automática (AWS EC2, Lightsail ou qualquer VPS Ubuntu)
+
+Em um servidor Ubuntu 22.04/24.04 novo, um único comando instala tudo (Node.js 22, PostgreSQL, Caddy com HTTPS, swap, banco, `.env` com segredos aleatórios, serviço e backup diário):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/altaimpactoprojetos-blip/crmempresa1/HEAD/scripts/instalar-vps.sh \
+  | sudo ADMIN_EMAIL=voce@empresa.com ADMIN_SENHA='senha-forte' DOMINIO=crm.empresa.com.br bash
+```
+
+- `DOMINIO` é opcional: sem ele o CRM fica acessível por `http://IP-DO-SERVIDOR`. Com ele (registro DNS apontando para o servidor), o Caddy emite o certificado HTTPS sozinho.
+- Na AWS, o mesmo conteúdo pode ir em **User data** ao criar a instância (com `#!/bin/bash` na primeira linha), e a instalação acontece sozinha na primeira inicialização.
+- Para **atualizar** o CRM depois, execute o mesmo comando (sem as variáveis): ele baixa o código novo, aplica migrações e reinicia o serviço.
+- Log da instalação: `/var/log/crm-instalacao.log`.
+
+As seções abaixo descrevem a instalação manual, passo a passo.
+
+
 ## 1. Banco de dados PostgreSQL
 
 Crie um usuário e um banco dedicados (troque a senha):
