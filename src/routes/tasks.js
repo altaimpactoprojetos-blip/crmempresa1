@@ -44,34 +44,63 @@ router.get('/', async (req, res, next) => {
     else if (view === 'overdue') where.push(`t.done_at IS NULL AND t.due_at < now()`);
     else if (view === 'open') where.push('t.done_at IS NULL');
     else if (view === 'done') where.push('t.done_at IS NOT NULL');
-    if (req.query.assignee_id) { params.push(Number(req.query.assignee_id)); where.push(`t.assignee_id = $${params.length}`); }
-    if (req.query.customer_id) { params.push(Number(req.query.customer_id)); where.push(`t.customer_id = $${params.length}`); }
-    const { rows } = await query(`${SELECT} WHERE ${where.join(' AND ')} ORDER BY t.done_at NULLS FIRST, t.due_at NULLS LAST, t.created_at DESC LIMIT 500`, params);
+    if (req.query.assignee_id) {
+      params.push(Number(req.query.assignee_id));
+      where.push(`t.assignee_id = $${params.length}`);
+    }
+    if (req.query.customer_id) {
+      params.push(Number(req.query.customer_id));
+      where.push(`t.customer_id = $${params.length}`);
+    }
+    const { rows } = await query(
+      `${SELECT} WHERE ${where.join(' AND ')} ORDER BY t.done_at NULLS FIRST, t.due_at NULLS LAST, t.created_at DESC LIMIT 500`,
+      params,
+    );
     const p2 = [];
     const scope2 = scopeSql(req.user, p2);
-    const summary = (await query(
-      `SELECT count(*) FILTER (WHERE done_at IS NULL AND ${localDate('due_at')} = ${todaySql()})::int AS today,
+    const summary = (
+      await query(
+        `SELECT count(*) FILTER (WHERE done_at IS NULL AND ${localDate('due_at')} = ${todaySql()})::int AS today,
               count(*) FILTER (WHERE done_at IS NULL AND ${localDate('due_at')} > ${todaySql()})::int AS upcoming,
               count(*) FILTER (WHERE done_at IS NULL AND due_at < now())::int AS overdue,
               count(*) FILTER (WHERE done_at IS NULL)::int AS open
-       FROM tasks t WHERE ${scope2}`, p2)).rows[0];
+       FROM tasks t WHERE ${scope2}`,
+        p2,
+      )
+    ).rows[0];
     res.json({ tasks: rows, summary });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.post('/', validate(schema), async (req, res, next) => {
   try {
     const d = req.data;
-    if (!isManager(req.user) && d.assignee_id && d.assignee_id !== req.user.id) return next(forbidden('Atendentes não podem atribuir tarefas a outros usuários.'));
+    if (!isManager(req.user) && d.assignee_id && d.assignee_id !== req.user.id)
+      return next(forbidden('Atendentes não podem atribuir tarefas a outros usuários.'));
     const assignee = d.assignee_id === undefined ? req.user.id : d.assignee_id;
     const { rows } = await query(
       `INSERT INTO tasks (title, description, customer_id, opportunity_id, ticket_id, assignee_id, due_at, priority, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [d.title, d.description || null, d.customer_id || null, d.opportunity_id || null, d.ticket_id || null, assignee, d.due_at || null, d.priority, req.user.id]);
+      [
+        d.title,
+        d.description || null,
+        d.customer_id || null,
+        d.opportunity_id || null,
+        d.ticket_id || null,
+        assignee,
+        d.due_at || null,
+        d.priority,
+        req.user.id,
+      ],
+    );
     if (assignee && assignee !== req.user.id) await notify(assignee, 'Nova tarefa atribuída', d.title, '#/tarefas');
     await audit(req, 'task_create', 'task', rows[0].id, { title: d.title });
     res.status(201).json({ task: rows[0], message: 'Tarefa criada.' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 });
 
 async function loadTask(req, id) {
@@ -85,7 +114,12 @@ router.put('/:id', validate(schema.partial().extend({ done: z.boolean().optional
   try {
     const t = await loadTask(req, Number(req.params.id));
     const d = req.data;
-    if (!isManager(req.user) && d.assignee_id !== undefined && d.assignee_id !== null && d.assignee_id !== req.user.id) {
+    if (
+      !isManager(req.user) &&
+      d.assignee_id !== undefined &&
+      d.assignee_id !== null &&
+      d.assignee_id !== req.user.id
+    ) {
       return next(forbidden('Atendentes não podem atribuir tarefas a outros usuários.'));
     }
     const { rows } = await query(
@@ -94,13 +128,34 @@ router.put('/:id', validate(schema.partial().extend({ done: z.boolean().optional
         assignee_id = CASE WHEN $8::boolean THEN $9 ELSE assignee_id END, due_at = CASE WHEN $10::boolean THEN $11 ELSE due_at END,
         priority = COALESCE($12, priority), done_at = CASE WHEN $13::boolean THEN (CASE WHEN $14::boolean THEN now() ELSE NULL END) ELSE done_at END,
         updated_at = now() WHERE id = $15 RETURNING *`,
-      [d.title ?? null, d.description !== undefined, d.description ?? null, d.customer_id !== undefined, d.customer_id ?? null,
-        d.opportunity_id !== undefined, d.opportunity_id ?? null, d.assignee_id !== undefined, d.assignee_id ?? null,
-        d.due_at !== undefined, d.due_at ?? null, d.priority ?? null, d.done !== undefined, d.done === true, t.id]);
-    if (d.assignee_id && d.assignee_id !== t.assignee_id && d.assignee_id !== req.user.id) await notify(d.assignee_id, 'Tarefa atribuída a você', t.title, '#/tarefas');
+      [
+        d.title ?? null,
+        d.description !== undefined,
+        d.description ?? null,
+        d.customer_id !== undefined,
+        d.customer_id ?? null,
+        d.opportunity_id !== undefined,
+        d.opportunity_id ?? null,
+        d.assignee_id !== undefined,
+        d.assignee_id ?? null,
+        d.due_at !== undefined,
+        d.due_at ?? null,
+        d.priority ?? null,
+        d.done !== undefined,
+        d.done === true,
+        t.id,
+      ],
+    );
+    if (d.assignee_id && d.assignee_id !== t.assignee_id && d.assignee_id !== req.user.id)
+      await notify(d.assignee_id, 'Tarefa atribuída a você', t.title, '#/tarefas');
     await audit(req, 'task_update', 'task', t.id, { fields: Object.keys(d) });
-    res.json({ task: rows[0], message: d.done === true ? 'Tarefa concluída.' : d.done === false ? 'Tarefa reaberta.' : 'Tarefa atualizada.' });
-  } catch (err) { next(err); }
+    res.json({
+      task: rows[0],
+      message: d.done === true ? 'Tarefa concluída.' : d.done === false ? 'Tarefa reaberta.' : 'Tarefa atualizada.',
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.delete('/:id', async (req, res, next) => {
@@ -110,7 +165,9 @@ router.delete('/:id', async (req, res, next) => {
     await query('DELETE FROM tasks WHERE id = $1', [t.id]);
     await audit(req, 'task_delete', 'task', t.id, { title: t.title });
     res.json({ ok: true, message: 'Tarefa excluída.' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;

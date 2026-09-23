@@ -37,7 +37,7 @@ function validCpf(c) {
 function validCnpj(c) {
   if (/^(\d)\1+$/.test(c)) return false;
   const calc = (len) => {
-    const w = len === 12 ? [5,4,3,2,9,8,7,6,5,4,3,2] : [6,5,4,3,2,9,8,7,6,5,4,3,2];
+    const w = len === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     let sum = 0;
     for (let i = 0; i < len; i++) sum += Number(c[i]) * w[i];
     const r = sum % 11;
@@ -68,22 +68,30 @@ function toCsv(rows, columns) {
 
 // Parser CSV simples com suporte a aspas; detecta separador ; ou ,
 function parseCsv(text) {
-  text = text.replace(/^﻿/, '');
+  text = text.replace(/^\uFEFF/, '');
   const firstLine = text.split(/\r?\n/)[0] || '';
   const sep = (firstLine.match(/;/g) || []).length >= (firstLine.match(/,/g) || []).length ? ';' : ',';
   const rows = [];
-  let row = [], field = '', inQuotes = false;
+  let row = [],
+    field = '',
+    inQuotes = false;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (inQuotes) {
       if (ch === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else inQuotes = false;
       } else field += ch;
     } else if (ch === '"') inQuotes = true;
-    else if (ch === sep) { row.push(field); field = ''; }
-    else if (ch === '\n' || ch === '\r') {
+    else if (ch === sep) {
+      row.push(field);
+      field = '';
+    } else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && text[i + 1] === '\n') i++;
-      row.push(field); field = '';
+      row.push(field);
+      field = '';
       if (row.some((f) => f.trim() !== '')) rows.push(row);
       row = [];
     } else field += ch;

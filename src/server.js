@@ -16,8 +16,14 @@ async function start() {
     console.error('Não foi possível conectar ao banco de dados:', err.message);
     process.exit(1);
   }
-  const server = app.listen(config.port, () => console.log(`CRM em execução em ${config.appUrl} (porta ${config.port}, ambiente ${config.env})`));
-  const shutdown = () => { console.log('Encerrando...'); server.close(() => pool.end().then(() => process.exit(0))); setTimeout(() => process.exit(1), 5000); };
+  const server = app.listen(config.port, () =>
+    console.log(`CRM em execução em ${config.appUrl} (porta ${config.port}, ambiente ${config.env})`),
+  );
+  const shutdown = () => {
+    console.log('Encerrando...');
+    server.close(() => pool.end().then(() => process.exit(0)));
+    setTimeout(() => process.exit(1), 5000);
+  };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }

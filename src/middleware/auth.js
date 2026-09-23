@@ -8,10 +8,9 @@ const ROLES = ['admin', 'supervisor', 'atendente'];
 async function loadUser(req, _res, next) {
   try {
     if (req.session && req.session.userId) {
-      const { rows } = await query(
-        'SELECT id, name, email, role, active, available FROM users WHERE id = $1',
-        [req.session.userId]
-      );
+      const { rows } = await query('SELECT id, name, email, role, active, available FROM users WHERE id = $1', [
+        req.session.userId,
+      ]);
       const user = rows[0];
       if (user && user.active) {
         req.user = user;
@@ -20,7 +19,9 @@ async function loadUser(req, _res, next) {
       }
     }
     next();
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 }
 
 function requireAuth(req, _res, next) {
