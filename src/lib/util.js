@@ -46,9 +46,11 @@ function validCnpj(c) {
   return calc(12) === Number(c[12]) && calc(13) === Number(c[13]);
 }
 
-// Gera protocolo único: AAAAMMDD-000123
+// Gera protocolo único por empresa: AAAAMMDD-000123
 async function nextProtocol(client) {
-  const { rows } = await client.query("SELECT nextval('ticket_protocol_seq') AS n");
+  const { rows } = await client.query(
+    'UPDATE companies SET ticket_seq = ticket_seq + 1 WHERE id = app_company_id() RETURNING ticket_seq AS n',
+  );
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
   return `${ymd}-${String(rows[0].n).padStart(6, '0')}`;

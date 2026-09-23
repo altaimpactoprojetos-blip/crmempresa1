@@ -13,6 +13,8 @@ async function main() {
     .sort();
   const client = await pool.connect();
   try {
+    // Migrações atuam sobre todas as empresas: ignoram o isolamento por empresa (Row Level Security).
+    await client.query("SELECT set_config('app.bypass_rls', 'on', false)");
     await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
       name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
     const { rows } = await client.query('SELECT name FROM schema_migrations');

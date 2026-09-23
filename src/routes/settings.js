@@ -13,13 +13,17 @@ const { badRequest } = require('../lib/errors');
 
 const router = express.Router();
 
-// Identidade visual pública (necessária na tela de login)
-router.get('/public', async (_req, res, next) => {
+// Identidade visual: da empresa, para quem está logado; do produto, na tela de login e de cadastro.
+router.get('/public', async (req, res, next) => {
   try {
+    const product = { app_name: config.appName, allow_signup: config.allowSignup };
+    if (!req.user) {
+      return res.json({ settings: { name: config.appName, logo_data: null, demo_mode: false }, product });
+    }
     const { rows } = await query(
-      'SELECT name, logo_data, primary_color, accent_color, demo_mode FROM company_settings WHERE id = 1',
+      'SELECT name, logo_data, primary_color, accent_color, demo_mode FROM company_settings WHERE company_id = app_company_id()',
     );
-    res.json({ settings: rows[0] });
+    res.json({ settings: rows[0], product });
   } catch (err) {
     next(err);
   }
@@ -27,7 +31,7 @@ router.get('/public', async (_req, res, next) => {
 
 router.get('/', requireAuth, async (req, res, next) => {
   try {
-    const { rows } = await query('SELECT * FROM company_settings WHERE id = 1');
+    const { rows } = await query('SELECT * FROM company_settings WHERE company_id = app_company_id()');
     const stages = await query('SELECT * FROM pipeline_stages ORDER BY position');
     res.json({
       settings: rows[0],
@@ -85,7 +89,7 @@ router.put(
         timezone = COALESCE($6, timezone), auto_distribution = COALESCE($7, auto_distribution),
         demo_mode = COALESCE($8, demo_mode), contact_sources = COALESCE($9, contact_sources),
         channels = COALESCE($10, channels), updated_at = now()
-       WHERE id = 1 RETURNING *`,
+       WHERE company_id = app_company_id() RETURNING *`,
         [
           d.name ?? null,
           d.logo_data !== undefined,
@@ -99,7 +103,7 @@ router.put(
           d.channels ?? null,
         ],
       );
-      await audit(req, 'settings_update', 'company_settings', 1, { fields: Object.keys(d) });
+      await audit(req, 'settings_update', 'company_settings', req.user.company_id, { fields: Object.keys(d) });
       broadcast('settings_changed', {});
       res.json({ settings: rows[0], message: 'Configurações salvas.' });
     } catch (err) {

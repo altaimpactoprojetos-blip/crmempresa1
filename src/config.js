@@ -8,6 +8,11 @@ function bool(v, def = false) {
 
 const config = {
   env: process.env.NODE_ENV || 'development',
+  // Nome do produto exibido antes do login (cada empresa tem o seu nome e logotipo depois de entrar)
+  appName: process.env.APP_NAME || 'CRM',
+  // Permite que novas empresas criem conta pela tela de login
+  allowSignup: bool(process.env.ALLOW_SIGNUP, true),
+  trialDays: Number(process.env.TRIAL_DAYS || 14),
   port: Number(process.env.PORT || 3000),
   appUrl: (process.env.APP_URL || `http://localhost:${process.env.PORT || 3000}`).replace(/\/$/, ''),
   databaseUrl: process.env.DATABASE_URL,
@@ -28,6 +33,7 @@ const config = {
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || '',
     appSecret: process.env.WHATSAPP_APP_SECRET || '',
+    companyId: Number(process.env.WHATSAPP_COMPANY_ID || 1),
   },
 };
 

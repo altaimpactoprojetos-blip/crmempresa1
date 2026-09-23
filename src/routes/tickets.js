@@ -216,7 +216,9 @@ router.post('/', validate(ticketSchema), async (req, res, next) => {
       let assigneeId = d.assignee_id || null;
       let distributed = false;
       if (!assigneeId) {
-        const settings = (await client.query('SELECT auto_distribution FROM company_settings WHERE id = 1')).rows[0];
+        const settings = (
+          await client.query('SELECT auto_distribution FROM company_settings WHERE company_id = app_company_id()')
+        ).rows[0];
         if (settings.auto_distribution || d.auto_assign) {
           const pick = await pickNextAttendant(client);
           if (pick) {

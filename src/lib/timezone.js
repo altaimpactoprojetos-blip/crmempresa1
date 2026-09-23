@@ -2,7 +2,7 @@
 // Datas "do dia" seguem o fuso configurado pela empresa (company_settings.timezone),
 // e não o fuso da sessão do PostgreSQL (normalmente UTC em servidores).
 
-const COMPANY_TZ = '(SELECT timezone FROM company_settings WHERE id = 1)';
+const COMPANY_TZ = '(SELECT timezone FROM company_settings WHERE company_id = app_company_id())';
 
 // Data local (no fuso da empresa) de uma expressão timestamptz.
 const localDate = (expr) => `(${expr} AT TIME ZONE ${COMPANY_TZ})::date`;

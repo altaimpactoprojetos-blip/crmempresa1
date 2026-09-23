@@ -4,11 +4,12 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { z } = require('zod');
-const { query } = require('../db');
+const { query, tx, runAsCompany, runAsSystem } = require('../db');
 const config = require('../config');
 const { validate } = require('../middleware/validate');
 const { requireAuth } = require('../middleware/auth');
-const { badRequest, unauthorized } = require('../lib/errors');
+const { badRequest, unauthorized, forbidden } = require('../lib/errors');
+const { createCompany } = require('../lib/companies');
 const { audit } = require('../lib/audit');
 const mailer = require('../lib/mailer');
 
@@ -34,17 +35,74 @@ router.post(
   async (req, res, next) => {
     try {
       const { email, password } = req.data;
-      const { rows } = await query('SELECT * FROM users WHERE lower(email) = lower($1)', [email]);
+      const { rows } = await runAsSystem(() =>
+        query(
+          `SELECT u.*, c.status AS company_status FROM users u JOIN companies c ON c.id = u.company_id
+           WHERE lower(u.email) = lower($1)`,
+          [email],
+        ),
+      );
       const user = rows[0];
       const ok = user && (await bcrypt.compare(password, user.password_hash));
       if (!ok) return next(unauthorized('E-mail ou senha incorretos.'));
       if (!user.active) return next(unauthorized('Usuário desativado. Fale com o administrador.'));
-      await new Promise((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
-      req.session.userId = user.id;
-      await query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
-      req.user = user;
-      await audit(req, 'login', 'user', user.id);
+      if (user.company_status === 'suspended' || user.company_status === 'cancelled') {
+        return next(unauthorized('A conta da sua empresa está suspensa. Fale com o suporte.'));
+      }
+      await startSession(req, user);
+      await runAsCompany(user.company_id, async () => {
+        await query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
+        await audit(req, 'login', 'user', user.id);
+      });
       res.json({ user: publicUser(user) });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// Cadastro de uma nova empresa (teste grátis) com o seu primeiro administrador.
+const signupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitos cadastros a partir deste endereço. Tente novamente mais tarde.' },
+});
+
+router.post(
+  '/signup',
+  signupLimiter,
+  validate(
+    z.object({
+      company_name: z.string().trim().min(2).max(120),
+      name: z.string().trim().min(2).max(120),
+      email: z.string().trim().email().max(200),
+      password: z.string().min(8, 'A senha deve ter ao menos 8 caracteres.').max(200),
+    }),
+  ),
+  async (req, res, next) => {
+    try {
+      if (!config.allowSignup) return next(forbidden('O cadastro de novas empresas está desativado.'));
+      const d = req.data;
+      const { company, admin } = await runAsSystem(async () => {
+        const dup = await query('SELECT 1 FROM users WHERE lower(email) = lower($1)', [d.email]);
+        if (dup.rowCount) {
+          throw badRequest('Este e-mail já está cadastrado. Faça login ou recupere a senha.', {
+            fields: { email: 'E-mail já cadastrado.' },
+          });
+        }
+        return tx((client) =>
+          createCompany(client, {
+            companyName: d.company_name,
+            adminName: d.name,
+            adminEmail: d.email,
+            adminPassword: d.password,
+          }),
+        );
+      });
+      await startSession(req, admin);
+      res.status(201).json({ user: publicUser(admin), company: { id: company.id, name: company.name } });
     } catch (err) {
       next(err);
     }
@@ -59,7 +117,10 @@ router.post('/logout', (req, res) => {
 });
 
 router.get('/me', requireAuth, (req, res) => {
-  res.json({ user: publicUser(req.user) });
+  res.json({
+    user: publicUser(req.user),
+    company: { id: req.user.company_id, status: req.user.company_status, trial_ends_at: req.user.trial_ends_at },
+  });
 });
 
 router.put(
@@ -111,11 +172,11 @@ router.post(
   validate(z.object({ email: z.string().trim().email() })),
   async (req, res, next) => {
     try {
-      const { rows } = await query('SELECT id, name, email FROM users WHERE lower(email) = lower($1) AND active', [
-        req.data.email,
-      ]);
+      const { rows } = await runAsSystem(() =>
+        query('SELECT id, name, email FROM users WHERE lower(email) = lower($1) AND active', [req.data.email]),
+      );
       if (rows[0]) {
-        const { token, link } = await createResetToken(rows[0].id);
+        const { token, link } = await runAsSystem(() => createResetToken(rows[0].id));
         const sent = await mailer
           .sendMail({
             to: rows[0].email,
@@ -153,18 +214,22 @@ router.post(
   async (req, res, next) => {
     try {
       const hash = crypto.createHash('sha256').update(req.data.token).digest('hex');
-      const { rows } = await query(
-        `SELECT pr.id, pr.user_id FROM password_resets pr
-       WHERE pr.token_hash = $1 AND pr.used_at IS NULL AND pr.expires_at > now()`,
-        [hash],
-      );
-      if (!rows[0]) return next(badRequest('Link inválido ou expirado. Solicite uma nova recuperação.'));
       const pwHash = await bcrypt.hash(req.data.password, 12);
-      await query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [pwHash, rows[0].user_id]);
-      await query('UPDATE password_resets SET used_at = now() WHERE id = $1', [rows[0].id]);
-      await query("DELETE FROM user_sessions WHERE sess->>'userId' = $1", [String(rows[0].user_id)]);
-      req.user = { id: rows[0].user_id };
-      await audit(req, 'password_reset', 'user', rows[0].user_id);
+      const reset = await runAsSystem(async () => {
+        const { rows } = await query(
+          `SELECT pr.id, pr.user_id, u.company_id FROM password_resets pr JOIN users u ON u.id = pr.user_id
+           WHERE pr.token_hash = $1 AND pr.used_at IS NULL AND pr.expires_at > now()`,
+          [hash],
+        );
+        if (!rows[0]) return null;
+        await query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [pwHash, rows[0].user_id]);
+        await query('UPDATE password_resets SET used_at = now() WHERE id = $1', [rows[0].id]);
+        await query("DELETE FROM user_sessions WHERE sess->>'userId' = $1", [String(rows[0].user_id)]);
+        return rows[0];
+      });
+      if (!reset) return next(badRequest('Link inválido ou expirado. Solicite uma nova recuperação.'));
+      req.user = { id: reset.user_id };
+      await runAsCompany(reset.company_id, () => audit(req, 'password_reset', 'user', reset.user_id));
       res.json({ ok: true, message: 'Senha redefinida. Faça login com a nova senha.' });
     } catch (err) {
       next(err);
@@ -180,6 +245,13 @@ async function createResetToken(userId) {
     [userId, hash],
   );
   return { token, link: `${config.appUrl}/#/redefinir-senha/${token}` };
+}
+
+async function startSession(req, user) {
+  await new Promise((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
+  req.session.userId = user.id;
+  req.session.companyId = user.company_id;
+  req.user = user;
 }
 
 function publicUser(u) {
