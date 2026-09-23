@@ -8,6 +8,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { badRequest } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { DEFAULTS } = require('../lib/chatbot');
+const { requireFeature } = require('../lib/subscription');
 
 const router = express.Router();
 router.use(requireAuth, requireRole('admin', 'supervisor'));
@@ -58,6 +59,7 @@ const schema = z.object({
 router.put('/', requireRole('admin'), validate(schema), async (req, res, next) => {
   try {
     const { enabled, config } = req.data;
+    if (enabled) await requireFeature('chatbot');
     for (const [day, span] of Object.entries(config.hours.days))
       if (span && span[0] >= span[1])
         return next(badRequest(`Horário inválido no dia ${day}: o fim deve ser depois do início.`));

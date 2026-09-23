@@ -11,6 +11,7 @@ const { query, tx, runAsCompany, currentCompanyId } = require('../db');
 const { broadcast } = require('./realtime');
 const { notify } = require('./notify');
 const outbox = require('./outbox');
+const { currentPlan } = require('./subscription');
 
 const MAX_TRIES = 3;
 const AWAY_EVERY_MS = 12 * 3600 * 1000; // aviso de fora do horário no máximo a cada 12h por conversa
@@ -151,7 +152,7 @@ async function route(conv, option) {
 // e depois envia. Devolve a lista de ações para os testes.
 async function handle(conversationId) {
   const { enabled, config } = await loadSettings();
-  if (!enabled) return null;
+  if (!enabled || !(await currentPlan())?.features?.chatbot) return null;
   const tz = (await query('SELECT timezone, name FROM company_settings')).rows[0] || {};
   const plan = await tx(async (client) => {
     const conv = (

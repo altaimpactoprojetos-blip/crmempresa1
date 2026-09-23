@@ -32,11 +32,23 @@ const config = {
     // Endereço da API da Meta (alterável só para testes)
     graphUrl: (process.env.WHATSAPP_GRAPH_URL || 'https://graph.facebook.com/v21.0').replace(/\/$/, ''),
   },
+  // Cobrança recorrente das empresas (Asaas). Sem ASAAS_API_KEY, o dono da plataforma ativa as empresas à mão.
+  billing: {
+    asaasApiKey: process.env.ASAAS_API_KEY || '',
+    asaasUrl: (
+      process.env.ASAAS_API_URL ||
+      (process.env.ASAAS_ENV === 'production' ? 'https://api.asaas.com/v3' : 'https://sandbox.asaas.com/api/v3')
+    ).replace(/\/$/, ''),
+    webhookToken: process.env.ASAAS_WEBHOOK_TOKEN || '',
+    // Dias de tolerância depois do vencimento antes de bloquear
+    graceDays: Number(process.env.BILLING_GRACE_DAYS || 5),
+  },
   // Chave para criptografar tokens de canais salvos no banco
   encryptionKey: process.env.ENCRYPTION_KEY || process.env.SESSION_SECRET,
 };
 
 config.smtp.configured = Boolean(config.smtp.host);
+config.billing.enabled = Boolean(config.billing.asaasApiKey);
 
 if (!config.databaseUrl) {
   console.error('DATABASE_URL não definido. Copie .env.example para .env e ajuste.');

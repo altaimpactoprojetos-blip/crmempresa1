@@ -12,6 +12,7 @@ const { encrypt, randomToken } = require('../lib/crypto');
 const whatsapp = require('../lib/whatsapp');
 const waweb = require('../lib/waweb');
 const meta = require('../lib/meta');
+const { checkLimit } = require('../lib/subscription');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -81,6 +82,7 @@ const channelSchema = z.object({
 router.post('/', requireRole('admin'), validate(channelSchema), async (req, res, next) => {
   try {
     const d = req.data;
+    await checkLimit('channels');
     const info = await whatsapp.getPhoneNumber(d.access_token, d.phone_number_id);
     const { rows } = await query(
       `INSERT INTO channels (name, phone_number_id, waba_id, display_phone, verified_name, access_token_enc,
@@ -123,6 +125,7 @@ const socialSchema = z.object({
 router.post('/social', requireRole('admin'), validate(socialSchema), async (req, res, next) => {
   try {
     const d = req.data;
+    await checkLimit('channels');
     const page = await meta.getPage(d.type, d.access_token, d.page_id);
     const ig = page.instagram_business_account;
     if (d.type === 'instagram' && !ig)
@@ -173,6 +176,7 @@ router.post(
   validate(z.object({ name: z.string().trim().min(1).max(80) })),
   async (req, res, next) => {
     try {
+      await checkLimit('channels');
       const { rows } = await query(
         `INSERT INTO channels (type, name, status, created_by) VALUES ('whatsapp_web', $1, 'pending', $2)
          RETURNING *, (app_secret_enc IS NOT NULL) AS has_app_secret`,
@@ -208,6 +212,7 @@ router.get('/:id/qr', requireRole('admin'), async (req, res, next) => {
 router.post('/:id/connect', requireRole('admin'), async (req, res, next) => {
   try {
     const ch = await loadWebChannel(req.params.id);
+    if (ch.status === 'disconnected') await checkLimit('channels');
     await query(
       `UPDATE channels SET status = CASE WHEN status = 'connected' THEN status ELSE 'pending' END,
       last_error = NULL, updated_at = now() WHERE id = $1`,
@@ -230,6 +235,7 @@ router.put(
       const id = Number(req.params.id);
       const cur = (await query('SELECT * FROM channels WHERE id = $1', [id])).rows[0];
       if (!cur) return next(notFound('Canal não encontrado.'));
+      if (cur.status === 'disconnected' && req.data.access_token) await checkLimit('channels');
       if (cur.type === 'whatsapp_web' && Object.keys(req.data).some((k) => k !== 'name'))
         return next(badRequest('Conexões por QR Code não usam token: gere um novo QR Code para reconectar.'));
       const d = req.data;

@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
 const { pool } = require('../db');
+const { billingGate } = require('../lib/subscription');
 
 // Registro central de todas as rotas da API (montado em /api).
 const api = express.Router();
@@ -14,7 +15,14 @@ api.get('/health', async (_req, res) => {
   }
 });
 
+// Painel do dono da plataforma (sessão própria, sem empresa) e webhook de cobrança
+api.use('/platform', require('./platform'));
+api.use('/webhooks', require('./webhooks'));
+
+// Empresa com teste encerrado ou pagamento atrasado: só a tela de assinatura continua liberada
+api.use(billingGate);
 api.use('/auth', require('./auth').router);
+api.use('/billing', require('./billing'));
 api.use('/users', require('./users'));
 api.use('/settings', require('./settings'));
 api.use('/customers', require('./customers').router);
@@ -30,6 +38,5 @@ api.use('/inbox', require('./inbox'));
 api.use('/channels', require('./channels'));
 api.use('/quick-replies', require('./quickReplies'));
 api.use('/chatbot', require('./chatbot'));
-api.use('/webhooks', require('./webhooks'));
 
 module.exports = api;

@@ -86,6 +86,13 @@ Ao criar uma **tabela nova** de dados: inclua `company_id INTEGER NOT NULL DEFAU
 - `lib/automations.js`: `onStageEntered()` é chamado depois que a transação que moveu/criou a oportunidade termina, e roda fora da requisição, no contexto da empresa. Cada ação recarrega a oportunidade e registra o resultado em `automation_runs`; uma falha não impede as seguintes. Para uma nova ação: some-a em `ACTIONS`, no esquema de `routes/automations.js` e em `actionFields()` de `public/js/pages/settings.js`.
 - Envio de mensagens (chat e automações) passa por `lib/outbox.js`.
 
+## Planos e cobrança
+
+- `plans` e as tabelas da plataforma (`platform_admins`, `platform_audit`, `billing_events`) não pertencem a uma empresa: a RLS só as libera sem contexto de empresa (`runAsSystem`); `plans` pode ser lido por todos.
+- `lib/subscription.js`: `blockReason()` (teste encerrado, atraso além da tolerância, período pago vencido) é calculado em `loadUser`; `billingGate` (montado em `routes/index.js`) responde 402 com `billing_blocked` para tudo fora da tela de assinatura. `checkLimit('users' | 'channels')` e `requireFeature('automations' | 'chatbot')` protegem as rotas de criação; automações e robô também conferem o plano ao rodar.
+- `lib/billing.js`: cliente do Asaas e `handleEvent()` do webhook (idempotente por `billing_events`). Nos testes, `config.billing.asaasUrl` aponta para um servidor falso (`tests/planos.test.js`).
+- `routes/platform.js`: painel do dono, com sessão própria (`req.session.platformAdminId`) e sempre em `runAsSystem`.
+
 ## Datas e fuso horário
 
 O servidor e o banco trabalham em UTC (`timestamptz`). Tudo que depende de "dia" — tarefas de hoje, filtros "de/até", relatórios — usa o **fuso configurado pela empresa** (`company_settings.timezone`) por meio de `src/lib/timezone.js`:

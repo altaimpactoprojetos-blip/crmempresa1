@@ -119,6 +119,13 @@ Cada empresa conecta o próprio número pela interface, em **Configurações ›
 
 A tela mostra o passo a passo na Meta, valida o token antes de salvar e exibe a URL e o token de verificação do webhook de cada número. Mensagens recebidas viram conversas na caixa de entrada; contatos novos viram clientes e oportunidades no funil.
 
+## 6.1 Painel da plataforma, planos e cobrança
+
+- Crie o seu acesso de dono da plataforma: `npm run create-platform-admin` (pede nome, e-mail e senha; rodar de novo com o mesmo e-mail troca a senha). Entre em `https://SEU_DOMINIO/plataforma`.
+- No painel: receita mensal, empresas (buscar, suspender, reativar, prorrogar teste, mudar plano, marcar "pago até" para pagamentos recebidos por fora), planos (preço, limites de usuários e canais, automações e robô) e registro de ações.
+- Cobrança automática pelo **Asaas** (Pix, boleto e cartão): preencha `ASAAS_API_KEY` e `ASAAS_WEBHOOK_TOKEN` no `.env` e, no Asaas, cadastre o webhook `https://SEU_DOMINIO/api/webhooks/asaas` com o mesmo token, com os eventos de cobrança. Pagamento confirmado libera a empresa por um mês; cobrança vencida marca "em atraso" e bloqueia depois de `BILLING_GRACE_DAYS` dias.
+- Empresa com teste encerrado ou pagamento atrasado continua conseguindo entrar, mas só vê a tela **Assinatura** até regularizar. Suspensa pelo painel não entra.
+
 ## 7. Backup e restauração
 
 - `npm run backup` gera `backups/crm-AAAAMMDD-HHMMSS.dump` (`pg_dump` formato custom, comprimido) e mantém os 30 mais recentes.

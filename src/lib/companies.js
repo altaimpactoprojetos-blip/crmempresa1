@@ -35,7 +35,7 @@ async function createCompany(client, { companyName, adminName, adminEmail, admin
   const company = (
     await client.query(
       `INSERT INTO companies (name, status, plan, trial_ends_at) VALUES ($1, $2, $3, ${trialEnds}) RETURNING *`,
-      [companyName, status, status === 'trial' ? 'trial' : 'pro'],
+      [companyName, status, status === 'trial' ? 'trial' : 'interno'],
     )
   ).rows[0];
   await client.query('INSERT INTO company_settings (company_id, name) VALUES ($1, $2)', [company.id, companyName]);

@@ -30,6 +30,8 @@ async function api(path, { method = 'GET', body, query } = {}) {
   else data = { raw: await res.text() };
   if (!res.ok) {
     if (res.status === 401 && window.CRM && CRM.onUnauthorized) CRM.onUnauthorized();
+    if (res.status === 402 && data && data.billing_blocked && window.CRM && CRM.onBillingBlocked)
+      CRM.onBillingBlocked(data);
     throw new ApiError(res.status, data);
   }
   return data;

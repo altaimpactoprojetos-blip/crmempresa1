@@ -7,6 +7,7 @@ const { decrypt } = require('../lib/crypto');
 const whatsapp = require('../lib/whatsapp');
 const { processWebhookValue, processMetaWebhook } = require('../lib/inbox');
 const meta = require('../lib/meta');
+const billing = require('../lib/billing');
 
 const router = express.Router();
 
@@ -62,6 +63,17 @@ router.post('/meta/:key', async (req, res, next) => {
     runAsCompany(channel.company_id, () => processMetaWebhook(channel, req.body || {})).catch((err) =>
       console.error(`Erro ao processar webhook do canal ${channel.id}:`, err.message),
     );
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Cobrança (Asaas): confirmado pelo token configurado no painel do Asaas (cabeçalho asaas-access-token)
+router.post('/asaas', async (req, res, next) => {
+  try {
+    if (!billing.validToken(req.get('asaas-access-token'))) return res.sendStatus(401);
+    const result = await billing.handleEvent(req.body || {});
+    res.json({ ok: true, ...result });
   } catch (err) {
     next(err);
   }

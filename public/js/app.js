@@ -147,23 +147,50 @@ const NAV = [
   ['#/relatorios', 'Relatórios', 'reports'],
   ['Empresa'],
   ['#/configuracoes', 'Configurações', 'settings'],
+  ['#/assinatura', 'Assinatura', 'money', 'admin'],
 ];
 const navHtml = () =>
-  NAV.map(([h, l, i]) =>
-    l
-      ? `<a href="${h}" data-nav="${h}">${UI.icons[i]}<span>${l}</span><span class="badge" data-nav-badge="${h}" hidden></span></a>`
-      : `<div class="nav-section">${h}</div>`,
-  ).join('');
+  NAV.filter(([, , , only]) => only !== 'admin' || CRM.isAdmin())
+    .map(([h, l, i]) =>
+      l
+        ? `<a href="${h}" data-nav="${h}">${UI.icons[i]}<span>${l}</span><span class="badge" data-nav-badge="${h}" hidden></span></a>`
+        : `<div class="nav-section">${h}</div>`,
+    )
+    .join('');
 
 function planChipHtml() {
   const c = CRM.company;
   if (!c) return '';
+  const chip = (title, text, cls = '') =>
+    `<a class="plan-chip ${cls}" href="#/assinatura"><strong>${title}</strong>${text}</a>`;
+  if (c.billing_block) return chip('Acesso bloqueado', 'Regularize a assinatura', 'danger');
+  if (c.status === 'past_due') return chip('Pagamento em atraso', 'Clique para regularizar', 'warning');
   if (c.status === 'trial' && c.trial_ends_at) {
     const days = Math.max(0, Math.ceil((new Date(c.trial_ends_at) - Date.now()) / 86400000));
-    return `<div class="plan-chip"><strong>Período de teste</strong>${days} ${days === 1 ? 'dia restante' : 'dias restantes'}</div>`;
+    return chip('Período de teste', `${days} ${days === 1 ? 'dia restante' : 'dias restantes'} · Assinar`);
   }
   return '';
 }
+
+CRM.planChipHtml = planChipHtml;
+
+// Empresa bloqueada (teste encerrado ou pagamento atrasado): tudo leva à tela de assinatura
+CRM.onBillingBlocked = (data) => {
+  if (!CRM.company) return;
+  const changed = !CRM.company.billing_block;
+  CRM.company.billing_block = data.reason || 'blocked';
+  if (!location.hash.startsWith('#/assinatura')) location.hash = '#/assinatura';
+  else if (changed) route();
+  if (changed && root.querySelector('#app')) {
+    // Menu lateral passa a mostrar o aviso de bloqueio
+    const footer = root.querySelector('.sidebar-footer');
+    if (footer) footer.innerHTML = planChipHtml();
+    else
+      root
+        .querySelector('#sidebar')
+        .insertAdjacentHTML('beforeend', `<div class="sidebar-footer">${planChipHtml()}</div>`);
+  }
+};
 
 function renderShell() {
   const u = CRM.user;
@@ -229,6 +256,7 @@ function renderShell() {
 }
 
 async function refreshBadges() {
+  if (CRM.company && CRM.company.billing_block) return;
   try {
     const [q, t, n, inbox] = await Promise.all([
       api('/tickets', { query: { queue: 'true', limit: 1 } }),
@@ -397,6 +425,10 @@ async function route() {
   }
   if (!root.querySelector('#app')) renderShell();
   UI.closeModals();
+  if (CRM.company && CRM.company.billing_block && !['assinatura', 'perfil'].includes(p0)) {
+    location.hash = '#/assinatura';
+    return;
+  }
   const map = {
     '': 'dashboard',
     conversas: 'inbox',
@@ -407,6 +439,7 @@ async function route() {
     relatorios: 'reports',
     configuracoes: 'settings',
     perfil: 'profile',
+    assinatura: 'billing',
   };
   const key = map[p0];
   root.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === `#/${p0}`));

@@ -5,6 +5,7 @@ const { query, tx, runAsCompany } = require('../db');
 const { notify } = require('./notify');
 const { broadcast } = require('./realtime');
 const outbox = require('./outbox');
+const { currentPlan } = require('./subscription');
 
 const ACTION_TYPES = ['create_task', 'send_whatsapp', 'set_owner', 'add_tag', 'notify'];
 
@@ -149,6 +150,8 @@ async function runOne(automation, opportunityId, actorId) {
 // Dispara as automações da etapa. Roda fora da requisição: não atrasa quem moveu o cartão.
 function onStageEntered({ companyId, opportunityId, stageId, actorId = null }) {
   return runAsCompany(companyId, async () => {
+    const plan = await currentPlan();
+    if (!plan?.features?.automations) return []; // plano sem automações (ex.: após mudar de plano)
     const { rows } = await query('SELECT * FROM automations WHERE active AND stage_id = $1 ORDER BY id', [stageId]);
     const results = [];
     for (const a of rows) results.push(await runOne(a, opportunityId, actorId));

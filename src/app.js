@@ -34,6 +34,8 @@ app.use('/api', csrfGuard, loadUser, apiRoutes, apiNotFound);
 
 // Frontend estático (SPA): qualquer outra rota devolve o index.html.
 app.use(express.static(PUBLIC_DIR, { maxAge: config.env === 'production' ? '1h' : 0, etag: true }));
+// Painel do dono da plataforma (página separada do CRM das empresas)
+app.get('/plataforma', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'plataforma.html')));
 app.get('*', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 app.use(errorHandler);

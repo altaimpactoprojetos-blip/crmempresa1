@@ -7,6 +7,7 @@ const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { badRequest, notFound } = require('../lib/errors');
 const { audit } = require('../lib/audit');
+const { requireFeature } = require('../lib/subscription');
 
 const router = express.Router();
 router.use(requireAuth, requireRole('admin', 'supervisor'));
@@ -53,6 +54,7 @@ async function checkStage(stageId) {
 router.post('/', requireRole('admin'), validate(schema), async (req, res, next) => {
   try {
     const d = req.data;
+    if (d.active) await requireFeature('automations');
     await checkStage(d.stage_id);
     const { rows } = await query(
       'INSERT INTO automations (name, stage_id, active, actions, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id',
@@ -69,6 +71,7 @@ router.post('/', requireRole('admin'), validate(schema), async (req, res, next) 
 router.put('/:id', requireRole('admin'), validate(schema.partial()), async (req, res, next) => {
   try {
     const d = req.data;
+    if (d.active !== false) await requireFeature('automations');
     if (d.stage_id) await checkStage(d.stage_id);
     const { rowCount } = await query(
       `UPDATE automations SET name = COALESCE($2, name), stage_id = COALESCE($3, stage_id), active = COALESCE($4, active),

@@ -93,6 +93,12 @@ Regra da Meta: resposta livre até 24h após a última mensagem do cliente; de 2
 
 Em **Configurações › Robô de atendimento**: mensagem de boas-vindas, menu com até 9 opções (cada uma pode responder, encaminhar para um atendente ou para o rodízio, mudar a etapa da oportunidade e etiquetar o cliente), horário de atendimento com aviso de "fora do horário" e escolha dos canais. O robô atende contatos novos e conversas reabertas; para assim que alguém da equipe responde ou assume a conversa. Mensagens do robô aparecem no chat como "🤖 Robô".
 
+## Planos, assinatura e painel da plataforma
+
+- **Planos** com limites de usuários e canais e recursos (automações, robô). Padrão: Básico (R$ 97), Profissional (R$ 197) e Empresarial (R$ 397), editáveis no painel.
+- Cada empresa vê o plano, o uso e os pagamentos em **Assinatura** e assina pelo **Asaas** (Pix, boleto ou cartão). Teste encerrado ou pagamento atrasado (depois da tolerância) deixa só a tela de assinatura liberada.
+- **Painel do dono da plataforma** em `/plataforma` (login próprio, `npm run create-platform-admin`): receita recorrente, empresas, suspender/reativar, prorrogar teste, mudar plano, pagamentos e registro de ações. Detalhes em [docs/INSTALACAO.md](docs/INSTALACAO.md#61-painel-da-plataforma-planos-e-cobrança).
+
 ## Funis, campos personalizados e automações
 
 - **Vários funis** por empresa (ex.: vendas, pós-venda, parcerias), cada um com as suas etapas, em **Configurações › Funis**. O funil **principal** recebe os contatos novos do WhatsApp. No quadro, cada funil vira uma aba.
