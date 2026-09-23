@@ -286,38 +286,56 @@ CRM.pages.settings = {
   async whatsapp(box) {
     const { channels } = await api('/channels');
     const statusBadge = (c) =>
-      c.status === 'connected'
-        ? '<span class="badge success">Conectado</span>'
-        : `<span class="badge ${c.status === 'error' ? 'danger' : ''}">Desconectado</span>`;
-    const channelCard = (
-      c,
-    ) => `<div class="card"><div class="card-title"><h3>${UI.esc(c.name)}</h3>${statusBadge(c)}</div>
-      <p><strong>${UI.esc(c.display_phone || '')}</strong> ${c.verified_name ? `<span class="muted">· ${UI.esc(c.verified_name)}</span>` : ''}</p>
-      ${c.last_error ? `<div class="alert danger small">${UI.esc(c.last_error)}</div>` : ''}
-      <h4>Webhook (configure no painel da Meta)</h4>
+      ({
+        connected: '<span class="badge success">Conectado</span>',
+        pending: '<span class="badge warning">Aguardando leitura do QR</span>',
+        error: '<span class="badge danger">Erro</span>',
+      })[c.status] || '<span class="badge">Desconectado</span>';
+    const kind = (c) => (c.type === 'whatsapp_web' ? 'QR Code (WhatsApp Web)' : 'API oficial (Meta)');
+    const apiDetails = (c) => `<h4>Webhook (configure no painel da Meta)</h4>
       ${UI.field('', 'URL de retorno (Callback URL)', `<input readonly value="${UI.attr(c.webhook_url)}" data-select-all>`)}
       ${UI.field('', 'Token de verificação (Verify token)', `<input readonly value="${UI.attr(c.verify_token)}" data-select-all>`)}
       <p class="small muted">Em WhatsApp › Configuração › Webhook, cole os dois valores acima e assine o campo <span class="mono">messages</span>.
       ${c.has_app_secret ? '' : '<br><strong>Recomendado:</strong> informe a chave secreta do app para o CRM conferir a assinatura de cada mensagem recebida.'}</p>
-      <p class="small muted">ID do número: <span class="mono">${UI.esc(c.phone_number_id)}</span>${c.waba_id ? ` · ID da conta (WABA): <span class="mono">${UI.esc(c.waba_id)}</span>` : ''}</p>
-      <div class="flex"><button class="btn secondary sm" data-edit="${c.id}">${c.status === 'connected' ? 'Atualizar credenciais' : 'Reconectar'}</button>
-      ${c.status === 'connected' ? `<button class="btn ghost sm" data-disconnect="${c.id}">Desconectar</button>` : ''}</div></div>`;
+      <p class="small muted">ID do número: <span class="mono">${UI.esc(c.phone_number_id)}</span>${c.waba_id ? ` · ID da conta (WABA): <span class="mono">${UI.esc(c.waba_id)}</span>` : ''}</p>`;
+    const actions = (c) => {
+      if (c.type === 'whatsapp_web')
+        return c.status === 'connected'
+          ? `<button class="btn ghost sm" data-disconnect="${c.id}">Desconectar</button>`
+          : `<button class="btn sm" data-qr="${c.id}">Gerar QR Code</button>`;
+      return `<button class="btn secondary sm" data-edit="${c.id}">${c.status === 'connected' ? 'Atualizar credenciais' : 'Reconectar'}</button>
+        ${c.status === 'connected' ? `<button class="btn ghost sm" data-disconnect="${c.id}">Desconectar</button>` : ''}`;
+    };
+    const channelCard = (
+      c,
+    ) => `<div class="card channel-card"><div class="card-title"><div><h3>${UI.esc(c.name)}</h3><div class="muted small">${kind(c)}</div></div>${statusBadge(c)}</div>
+      ${c.display_phone ? `<p><strong>${UI.esc(UI.fmtPhone(c.display_phone))}</strong> ${c.verified_name ? `<span class="muted">· ${UI.esc(c.verified_name)}</span>` : ''}</p>` : ''}
+      ${c.last_error ? `<div class="alert warning small">${UI.esc(c.last_error)}</div>` : ''}
+      ${c.type === 'whatsapp' && CRM.isAdmin() ? apiDetails(c) : ''}
+      <div class="flex">${actions(c)}</div></div>`;
     const credentialFields = (isNew) => `
-      ${isNew ? UI.field('name', 'Nome do canal', UI.input('name', 'WhatsApp', 'required maxlength="80"'), { required: true, hint: 'Ex.: Vendas, Suporte.' }) : ''}
+      ${isNew ? UI.field('name', 'Nome da conexão', UI.input('name', 'WhatsApp', 'required maxlength="80"'), { required: true, hint: 'Ex.: Vendas, Suporte.' }) : ''}
       ${UI.field('access_token', 'Token de acesso permanente', UI.input('access_token', '', `type="password" ${isNew ? 'required' : ''} autocomplete="off"`), { required: isNew, hint: 'Gerado em Configurações do negócio › Usuários do sistema, com as permissões whatsapp_business_messaging e whatsapp_business_management.' })}
       ${isNew ? UI.field('phone_number_id', 'ID do número de telefone (Phone number ID)', UI.input('phone_number_id', '', 'required inputmode="numeric"'), { required: true }) : ''}
       ${UI.field('waba_id', 'ID da conta do WhatsApp Business (WABA ID)', UI.input('waba_id', '', 'inputmode="numeric"'), { hint: 'Necessário para listar os modelos de mensagem aprovados.' })}
       ${UI.field('app_secret', 'Chave secreta do app (App Secret)', UI.input('app_secret', '', 'type="password" autocomplete="off"'), { hint: 'Em Configurações do app › Básico. Protege o webhook contra mensagens falsas.' })}`;
-    box.innerHTML = `${channels.map(channelCard).join('')}
-      <div class="card"><h3>${channels.length ? 'Conectar outro número' : 'Conectar o WhatsApp da empresa'}</h3>
-      <p class="small">Use a <strong>API oficial do WhatsApp Business (Meta)</strong>: sem risco de bloqueio do número e com várias pessoas atendendo ao mesmo tempo.</p>
-      <details class="help"><summary>Passo a passo na Meta</summary><ol class="small">
-        <li>Em <span class="mono">developers.facebook.com</span>, crie um app do tipo <em>Empresa</em> e adicione o produto <em>WhatsApp</em>.</li>
-        <li>Em WhatsApp › Configuração da API, adicione e verifique o número da empresa. Copie o <em>ID do número de telefone</em> e o <em>ID da conta do WhatsApp Business</em>.</li>
-        <li>Em business.facebook.com › Configurações do negócio › Usuários do sistema, crie um usuário administrador, atribua o app e a conta do WhatsApp e gere um <em>token permanente</em>.</li>
-        <li>Em Configurações do app › Básico, copie a <em>Chave secreta do app</em>.</li>
-        <li>Preencha o formulário abaixo. Depois, configure o webhook na Meta com os dados que vão aparecer aqui.</li></ol></details>
-      <form id="waForm" class="mt">${credentialFields(true)}<button class="btn">Conectar</button></form></div>`;
+    box.innerHTML = `${channels.length ? `<div class="grid cols-2">${channels.map(channelCard).join('')}</div>` : ''}
+      <h3 class="mt">${channels.length ? 'Adicionar outra conexão' : 'Conectar o WhatsApp da empresa'}</h3>
+      <div class="grid cols-2">
+        <div class="card option-card"><div class="option-icon">▣</div><h3>Pelo QR Code</h3>
+          <p class="small">Conecte em 1 minuto, usando o WhatsApp que já está no celular da empresa, como no WhatsApp Web. Fotos e áudios continuam no celular: o CRM só os mostra quando você abre.</p>
+          <div class="alert warning small"><strong>Atenção:</strong> esta conexão não é oficial. O WhatsApp pode bloquear o número, principalmente se ele enviar muitas mensagens para quem não tem o número salvo. Para grandes volumes, prefira a API oficial.</div>
+          <button class="btn" id="newQr">Gerar QR Code</button></div>
+        <div class="card option-card"><div class="option-icon">✓</div><h3>Pela API oficial da Meta <span class="badge success">Recomendado</span></h3>
+          <p class="small">Sem risco de bloqueio, com modelos de mensagem aprovados e várias pessoas atendendo. Exige conta no Meta Business.</p>
+          <details class="help"><summary>Passo a passo na Meta</summary><ol class="small">
+            <li>Em <span class="mono">developers.facebook.com</span>, crie um app do tipo <em>Empresa</em> e adicione o produto <em>WhatsApp</em>.</li>
+            <li>Em WhatsApp › Configuração da API, adicione e verifique o número da empresa. Copie o <em>ID do número de telefone</em> e o <em>ID da conta do WhatsApp Business</em>.</li>
+            <li>Em business.facebook.com › Configurações do negócio › Usuários do sistema, crie um usuário administrador, atribua o app e a conta do WhatsApp e gere um <em>token permanente</em>.</li>
+            <li>Em Configurações do app › Básico, copie a <em>Chave secreta do app</em>.</li>
+            <li>Preencha o formulário abaixo. Depois, configure o webhook na Meta com os dados que vão aparecer aqui.</li></ol></details>
+          <form id="waForm" class="mt">${credentialFields(true)}<button class="btn">Conectar pela API</button></form></div>
+      </div>`;
     const form = box.querySelector('#waForm');
     const clean = (d) => Object.fromEntries(Object.entries(d).filter(([, v]) => v !== '' && v != null));
     form.onsubmit = async (e) => {
@@ -334,9 +352,31 @@ CRM.pages.settings = {
         btn.disabled = false;
       }
     };
+    box.querySelector('#newQr').onclick = async () => {
+      const name = await UI.prompt('Nome da conexão', {
+        title: 'Conectar pelo QR Code',
+        placeholder: 'Ex.: WhatsApp da loja',
+      });
+      if (!name) return;
+      try {
+        const r = await api('/channels/web', { method: 'POST', body: { name } });
+        this.qrModal(r.channel.id, box);
+      } catch (err) {
+        UI.err(err);
+      }
+    };
     box.onclick = async (e) => {
       const edit = e.target.closest('[data-edit]');
       const disc = e.target.closest('[data-disconnect]');
+      const qr = e.target.closest('[data-qr]');
+      if (qr) {
+        try {
+          await api(`/channels/${qr.dataset.qr}/connect`, { method: 'POST' });
+          this.qrModal(Number(qr.dataset.qr), box);
+        } catch (err) {
+          UI.err(err);
+        }
+      }
       if (disc) {
         if (
           !(await UI.confirm(
@@ -373,6 +413,49 @@ CRM.pages.settings = {
         };
       }
     };
+  },
+
+  // Mostra o QR Code e acompanha a leitura pelo celular até conectar.
+  qrModal(channelId, box) {
+    let timer;
+    const m = UI.modal({
+      title: 'Conectar pelo QR Code',
+      body: `<div class="qr-box"><div id="qrArea" class="qr-area"><p class="muted">Gerando QR Code...</p></div>
+        <ol class="small qr-steps"><li>Abra o <strong>WhatsApp</strong> no celular da empresa.</li>
+        <li>Toque em <strong>Mais opções (⋮)</strong> ou <strong>Configurações</strong> e depois em <strong>Aparelhos conectados</strong>.</li>
+        <li>Toque em <strong>Conectar um aparelho</strong> e aponte a câmera para este código.</li></ol></div>`,
+      footer: '<button class="btn secondary" data-close>Fechar</button>',
+      onClose: () => {
+        clearTimeout(timer);
+        this.whatsapp(box);
+      },
+    });
+    const area = m.el.querySelector('#qrArea');
+    const poll = async () => {
+      try {
+        const s = await api(`/channels/${channelId}/qr`);
+        if (s.status === 'connected') {
+          area.innerHTML =
+            '<div class="qr-done">✓</div><p><strong>WhatsApp conectado!</strong></p><p class="small muted">As novas mensagens vão aparecer em Conversas.</p>';
+          return;
+        }
+        if (s.status === 'disconnected' || s.status === 'error') {
+          area.innerHTML = `<div class="alert warning small">${UI.esc(s.last_error || 'Conexão interrompida.')}</div><button class="btn" id="qrRetry">Gerar novo QR Code</button>`;
+          area.querySelector('#qrRetry').onclick = async () => {
+            area.innerHTML = '<p class="muted">Gerando QR Code...</p>';
+            await api(`/channels/${channelId}/connect`, { method: 'POST' });
+            timer = setTimeout(poll, 1500);
+          };
+          return;
+        }
+        if (s.qr) area.innerHTML = `<img src="${UI.attr(s.qr)}" alt="QR Code do WhatsApp" width="260" height="260">`;
+      } catch (err) {
+        area.innerHTML = `<div class="alert danger small">${UI.esc(err.message)}</div>`;
+        return;
+      }
+      timer = setTimeout(poll, 2000);
+    };
+    poll();
   },
 
   async respostas(box) {

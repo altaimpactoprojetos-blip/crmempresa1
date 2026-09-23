@@ -12,6 +12,8 @@ const { notify } = require('../lib/notify');
 const { normalizePhone } = require('../lib/util');
 const { preview } = require('../lib/inbox');
 const whatsapp = require('../lib/whatsapp');
+const waweb = require('../lib/waweb');
+const { brPhoneVariants } = require('../lib/util');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -19,6 +21,8 @@ router.use(requireAuth);
 // A Meta só aceita mensagens livres até 24h após a última mensagem do cliente; depois, só modelos aprovados.
 const WINDOW_MS = 24 * 3600 * 1000;
 const windowInfo = (c) => {
+  // Conexão por QR Code (WhatsApp Web) não tem essa regra
+  if (c.channel_type === 'whatsapp_web') return { window_open: true, window_expires_at: null };
   const expires = c.last_inbound_at ? new Date(new Date(c.last_inbound_at).getTime() + WINDOW_MS) : null;
   return { window_open: Boolean(expires && expires > new Date()), window_expires_at: expires };
 };
@@ -30,7 +34,7 @@ function scopeSql(user, params) {
   return `(c.assignee_id = $${params.length} OR c.assignee_id IS NULL)`;
 }
 
-const SELECT = `SELECT c.*, ch.name AS channel_name, ch.display_phone AS channel_phone, ch.status AS channel_status,
+const SELECT = `SELECT c.*, ch.name AS channel_name, ch.display_phone AS channel_phone, ch.status AS channel_status, ch.type AS channel_type,
     u.name AS assignee_name, cu.name AS customer_name, o.title AS opportunity_title, o.value AS opportunity_value,
     o.stage_id, s.name AS stage_name, s.kind AS stage_kind
   FROM conversations c JOIN channels ch ON ch.id = c.channel_id
@@ -117,19 +121,24 @@ router.post(
       if (!phone) return next(badRequest('Cadastre o telefone (com DDD) do cliente para conversar pelo WhatsApp.'));
       const channel = (
         await query(
-          `SELECT id FROM channels WHERE status = 'connected' AND ($1::int IS NULL OR id = $1) ORDER BY created_at LIMIT 1`,
+          `SELECT * FROM channels WHERE status = 'connected' AND ($1::int IS NULL OR id = $1) ORDER BY created_at LIMIT 1`,
           [req.data.channel_id || null],
         )
       ).rows[0];
       if (!channel) return next(conflict('Nenhum WhatsApp conectado. Conecte um número em Configurações › WhatsApp.'));
+      let contact = { phone, jid: null };
+      if (channel.type === 'whatsapp_web') {
+        contact = await waweb.resolveJid(channel, brPhoneVariants(phone));
+        if (!contact) return next(badRequest('Este número não tem WhatsApp.'));
+      }
       const conv = (
         await query(
-          `INSERT INTO conversations (channel_id, customer_id, contact_phone, contact_name, assignee_id)
-         VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO conversations (channel_id, customer_id, contact_phone, contact_name, contact_jid, assignee_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (company_id, channel_id, contact_phone)
            DO UPDATE SET customer_id = COALESCE(conversations.customer_id, EXCLUDED.customer_id), updated_at = now()
          RETURNING id`,
-          [channel.id, cust.id, phone, cust.name, req.user.id],
+          [channel.id, cust.id, contact.phone, cust.name, contact.jid, req.user.id],
         )
       ).rows[0];
       broadcast('inbox_changed', { conversation_id: conv.id });
@@ -221,7 +230,10 @@ router.post(
       const id = await sendOutgoing(req, c, {
         type: 'text',
         body: req.data.body,
-        send: () => whatsapp.sendText(channel, c.contact_phone, req.data.body),
+        send: () =>
+          channel.type === 'whatsapp_web'
+            ? waweb.sendText(channel, c.contact_jid || `${c.contact_phone}@s.whatsapp.net`, req.data.body)
+            : whatsapp.sendText(channel, c.contact_phone, req.data.body),
       });
       res.status(201).json({ id, message: 'Mensagem enviada.' });
     } catch (err) {
@@ -234,6 +246,8 @@ router.get('/conversations/:id/templates', async (req, res, next) => {
   try {
     const c = await loadConversation(req, req.params.id);
     const channel = await loadChannel(c);
+    if (channel.type === 'whatsapp_web')
+      return res.json({ templates: [], waba_configured: false, not_applicable: true });
     const templates = await whatsapp.listTemplates(channel);
     res.json({
       templates: templates.map((t) => {
@@ -270,6 +284,8 @@ router.post(
     try {
       const c = await loadConversation(req, req.params.id);
       const channel = await loadChannel(c);
+      if (channel.type === 'whatsapp_web')
+        return next(badRequest('Modelos de mensagem só existem na API oficial do WhatsApp.'));
       const d = req.data;
       const id = await sendOutgoing(req, c, {
         type: 'template',
@@ -363,7 +379,10 @@ router.get('/messages/:id/media', async (req, res, next) => {
     if (!m) return next(notFound('Mídia não encontrada.'));
     const c = await loadConversation(req, m.conversation_id);
     const channel = (await query('SELECT * FROM channels WHERE id = $1', [c.channel_id])).rows[0];
-    const file = await whatsapp.fetchMedia(channel, m.media.id);
+    const file =
+      channel.type === 'whatsapp_web'
+        ? await waweb.fetchMedia(channel, m.media)
+        : await whatsapp.fetchMedia(channel, m.media.id);
     const mime = String(file.mimeType || 'application/octet-stream')
       .split(';')[0]
       .trim();

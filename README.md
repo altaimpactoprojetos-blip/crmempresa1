@@ -61,7 +61,17 @@ A fila é atualizada em tempo real entre os usuários (Server-Sent Events) e tod
 
 ## WhatsApp: caixa de entrada (estilo Kommo)
 
-Cada empresa conecta o **próprio número** em **Configurações › WhatsApp**, usando a **API oficial do WhatsApp Business (Meta Cloud API)** — sem risco de bloqueio do número e com a equipe inteira atendendo ao mesmo tempo. A tela traz o passo a passo na Meta e mostra a URL e o token do webhook de cada número.
+Cada empresa conecta o **próprio número** em **Configurações › WhatsApp**, de dois jeitos:
+
+| | **QR Code** (como o WhatsApp Web) | **API oficial da Meta** (recomendado) |
+|---|---|---|
+| Como conecta | Lê o QR com o celular (Aparelhos conectados) | Token do Meta Business, passo a passo na tela |
+| Risco de bloqueio do número | **Existe** (uso não oficial; aviso exibido na tela) | Não |
+| Janela de 24h / modelos | Não se aplica | Sim |
+| Fotos e áudios | Ficam no celular/WhatsApp; o CRM só guarda a referência criptografada e busca quando alguém abre | Buscados na Meta quando alguém abre |
+| Mensagens enviadas pelo celular | Aparecem no CRM | — |
+
+A conexão por QR usa a biblioteca de código aberto [Baileys](https://github.com/WhiskeySockets/Baileys). A sessão fica no banco, criptografada, e é retomada automaticamente quando o servidor reinicia. Grupos, status e canais são ignorados.
 
 - **Conversas**: lista à esquerda, chat à direita, em tempo real. Filtros Abertas, Minhas, Sem responsável, Não lidas e Encerradas.
 - **Contato novo vira cliente e oportunidade** na primeira etapa do funil automaticamente (desativável em Configurações › Empresa). Celulares brasileiros sem o 9 extra são ligados ao cliente já cadastrado.
@@ -69,7 +79,7 @@ Cada empresa conecta o **próprio número** em **Configurações › WhatsApp**,
 - **Janela de 24 horas** da Meta: depois de 24h sem mensagem do cliente, o CRM oferece os **modelos aprovados** da conta (com variáveis).
 - **Respostas rápidas** (`/atalho`, com `{nome}`), **anotações internas** (nunca enviadas ao cliente), mudança de etapa do funil e status de entrega (enviada, entregue, lida, falhou).
 - Imagens, áudios, vídeos e documentos recebidos são exibidos no chat, baixados da Meta sob demanda.
-- Segurança: tokens guardados criptografados (`ENCRYPTION_KEY`), URL de webhook secreta por número e verificação da assinatura da Meta (App Secret).
+- Segurança: tokens e sessões guardados criptografados (`ENCRYPTION_KEY`), URL de webhook secreta por número e verificação da assinatura da Meta (App Secret).
 
 Sem número conectado, nada é enviado nem simulado; o botão do cliente oferece abrir o WhatsApp no aplicativo.
 
@@ -127,7 +137,7 @@ src/
                            # inbox (conversas), channels (WhatsApp), quickReplies, webhooks
   middleware/              # security, session, csrf, auth, validate, errorHandler
   lib/                     # errors, audit, notify, realtime, mailer, timezone, util, companies,
-                           # inbox (mensagens recebidas), whatsapp (API da Meta), crypto (segredos)
+                           # inbox (mensagens recebidas), whatsapp (API da Meta), waweb (QR Code), crypto
 public/                    # frontend (SPA sem build): index.html, css/, js/api.js, js/ui.js, js/pages/, js/app.js
 scripts/                   # migrate, create-admin, seed-demo, backup.sh, restore.sh
 tests/                     # testes de integração (node:test)

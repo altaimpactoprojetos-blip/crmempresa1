@@ -74,6 +74,7 @@ Ao criar uma **tabela nova** de dados: inclua `company_id INTEGER NOT NULL DEFAU
 - `routes/webhooks.js` responde 200 à Meta imediatamente e processa em segundo plano, no contexto da empresa do canal (`lib/inbox.js`). Eventos repetidos são ignorados pelo `wa_message_id`.
 - `lib/whatsapp.js` é o único ponto que fala com a Graph API. Nos testes, `config.whatsapp.graphUrl` aponta para um servidor falso (`tests/inbox.test.js`).
 - Mídias nunca são salvas: são buscadas na Meta quando alguém abre. Só formatos seguros abrem no navegador; o resto é baixado como arquivo.
+- **QR Code** (`lib/waweb.js`): uma conexão do WhatsApp Web por canal, no mesmo processo do servidor. Credenciais e chaves ficam em `channel_session_keys` (criptografadas); as conexões ativas são retomadas em `server.js`. Mensagens entram por `inbox.ingestMessage`, o mesmo caminho da API oficial. Nos testes, `waweb.setDriver()` troca a biblioteca por um WhatsApp falso (`tests/qrcode.test.js`).
 
 ## Datas e fuso horário
 

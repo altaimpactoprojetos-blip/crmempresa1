@@ -6,10 +6,11 @@ const { query } = require('../db');
 const config = require('../config');
 const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { notFound, conflict } = require('../lib/errors');
+const { notFound, conflict, badRequest } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { encrypt, randomToken } = require('../lib/crypto');
 const whatsapp = require('../lib/whatsapp');
+const waweb = require('../lib/waweb');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -28,7 +29,7 @@ function present(row, user) {
     status: row.status,
     last_error: row.last_error,
   };
-  if (user.role === 'admin') {
+  if (user.role === 'admin' && row.type === 'whatsapp') {
     Object.assign(out, {
       phone_number_id: row.phone_number_id,
       waba_id: row.waba_id,
@@ -96,6 +97,60 @@ router.post('/', requireRole('admin'), validate(channelSchema), async (req, res,
   }
 });
 
+// WhatsApp por QR Code: cria a conexão e começa a gerar o QR (lido pelo celular em Aparelhos conectados).
+router.post(
+  '/web',
+  requireRole('admin'),
+  validate(z.object({ name: z.string().trim().min(1).max(80) })),
+  async (req, res, next) => {
+    try {
+      const { rows } = await query(
+        `INSERT INTO channels (type, name, status, created_by) VALUES ('whatsapp_web', $1, 'pending', $2)
+         RETURNING *, (app_secret_enc IS NOT NULL) AS has_app_secret`,
+        [req.data.name, req.user.id],
+      );
+      await waweb.start(rows[0]);
+      await audit(req, 'channel_connect', 'channel', rows[0].id, { type: 'whatsapp_web' });
+      res.status(201).json({ channel: present(rows[0], req.user), message: 'Leia o QR Code com o celular.' });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+async function loadWebChannel(id) {
+  const ch = (await query(`SELECT * FROM channels WHERE id = $1 AND type = 'whatsapp_web'`, [Number(id)])).rows[0];
+  if (!ch) throw notFound('Conexão não encontrada.');
+  return ch;
+}
+
+// Situação da conexão por QR Code e o QR atual (imagem), para a tela acompanhar a leitura.
+router.get('/:id/qr', requireRole('admin'), async (req, res, next) => {
+  try {
+    const ch = await loadWebChannel(req.params.id);
+    const live = waweb.state(ch.id);
+    res.json({ status: ch.status, connecting: live.status === 'pending', qr: live.qr, last_error: ch.last_error });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Gera um novo QR Code (ou retoma a sessão salva) para uma conexão desconectada.
+router.post('/:id/connect', requireRole('admin'), async (req, res, next) => {
+  try {
+    const ch = await loadWebChannel(req.params.id);
+    await query(
+      `UPDATE channels SET status = CASE WHEN status = 'connected' THEN status ELSE 'pending' END,
+      last_error = NULL, updated_at = now() WHERE id = $1`,
+      [ch.id],
+    );
+    await waweb.start({ ...ch, status: 'pending' });
+    res.json({ ok: true, message: 'Leia o QR Code com o celular.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Atualiza nome/credenciais ou reconecta um canal.
 router.put(
   '/:id',
@@ -106,6 +161,8 @@ router.put(
       const id = Number(req.params.id);
       const cur = (await query('SELECT * FROM channels WHERE id = $1', [id])).rows[0];
       if (!cur) return next(notFound('Canal não encontrado.'));
+      if (cur.type === 'whatsapp_web' && Object.keys(req.data).some((k) => k !== 'name'))
+        return next(badRequest('Conexões por QR Code não usam token: gere um novo QR Code para reconectar.'));
       const d = req.data;
       let info = {};
       if (d.access_token) info = await whatsapp.getPhoneNumber(d.access_token, cur.phone_number_id);
@@ -140,6 +197,8 @@ router.put(
 // Desconecta: o histórico de conversas é mantido; novas mensagens deixam de ser recebidas e enviadas.
 router.post('/:id/disconnect', requireRole('admin'), async (req, res, next) => {
   try {
+    const cur = (await query('SELECT * FROM channels WHERE id = $1', [Number(req.params.id)])).rows[0];
+    if (cur && cur.type === 'whatsapp_web') await waweb.logout(cur); // desconecta o aparelho e apaga a sessão
     const { rows } = await query(
       `UPDATE channels SET status = 'disconnected', updated_at = now() WHERE id = $1 RETURNING ${PUBLIC_FIELDS}`,
       [Number(req.params.id)],

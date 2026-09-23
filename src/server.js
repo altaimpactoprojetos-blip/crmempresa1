@@ -2,6 +2,7 @@
 const config = require('./config');
 const app = require('./app');
 const { pool, query, runAsSystem } = require('./db');
+const waweb = require('./lib/waweb');
 
 async function start() {
   try {
@@ -29,8 +30,14 @@ async function start() {
   const server = app.listen(config.port, () =>
     console.log(`CRM em execução em ${config.appUrl} (porta ${config.port}, ambiente ${config.env})`),
   );
+  // Retoma as conexões de WhatsApp por QR Code que estavam ativas
+  waweb
+    .resumeAll()
+    .then((n) => n && console.log(`WhatsApp por QR Code: ${n} conexão(ões) retomada(s).`))
+    .catch((err) => console.error('Falha ao retomar conexões do WhatsApp:', err.message));
   const shutdown = () => {
     console.log('Encerrando...');
+    waweb.stopAll();
     server.close(() => pool.end().then(() => process.exit(0)));
     setTimeout(() => process.exit(1), 5000);
   };
