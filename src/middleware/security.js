@@ -23,6 +23,7 @@ const securityHeaders = helmet({
     },
   },
   strictTransportSecurity: https,
+  crossOriginOpenerPolicy: https,
   crossOriginEmbedderPolicy: false,
 });
 
