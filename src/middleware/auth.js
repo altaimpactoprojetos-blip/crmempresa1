@@ -1,6 +1,7 @@
 'use strict';
 const { unauthorized, forbidden } = require('../lib/errors');
 const { query, runAsCompany } = require('../db');
+const { blockReason } = require('../lib/subscription');
 
 const ROLES = ['admin', 'supervisor', 'atendente'];
 
@@ -17,12 +18,18 @@ function loadUser(req, _res, next) {
     try {
       const { rows } = await query(
         `SELECT u.id, u.company_id, u.name, u.email, u.role, u.active, u.available,
-                c.status AS company_status, c.trial_ends_at
+                c.status AS company_status, c.trial_ends_at, c.plan, c.current_period_end, c.past_due_since
          FROM users u JOIN companies c ON c.id = u.company_id WHERE u.id = $1`,
         [userId],
       );
       const user = rows[0];
       if (user && user.active && user.company_status !== 'suspended' && user.company_status !== 'cancelled') {
+        user.billing_block = blockReason({
+          status: user.company_status,
+          trial_ends_at: user.trial_ends_at,
+          current_period_end: user.current_period_end,
+          past_due_since: user.past_due_since,
+        });
         req.user = user;
         next();
       } else {

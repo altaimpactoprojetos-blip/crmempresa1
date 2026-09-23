@@ -11,6 +11,7 @@
 #   ADMIN_EMAIL, ADMIN_SENHA  primeiro administrador (obrigatórias só na primeira instalação)
 #   ADMIN_NOME                nome do administrador (padrão: Administrador)
 #   ADMIN_EMPRESA             nome da primeira empresa (padrão: Minha Empresa)
+#   PLATAFORMA_EMAIL, PLATAFORMA_SENHA  cria (ou troca a senha do) acesso ao painel /plataforma (opcional)
 #   DOMINIO                   ex.: crm.empresa.com.br — com domínio o Caddy ativa HTTPS; sem ele, HTTP pelo IP
 #   REPO_URL, BRANCH          origem do código (padrão: repositório oficial, branch padrão)
 #
@@ -24,6 +25,8 @@ ADMIN_NOME="${ADMIN_NOME:-Administrador}"
 ADMIN_EMPRESA="${ADMIN_EMPRESA:-Minha Empresa}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-}"
 ADMIN_SENHA="${ADMIN_SENHA:-}"
+PLATAFORMA_EMAIL="${PLATAFORMA_EMAIL:-}"
+PLATAFORMA_SENHA="${PLATAFORMA_SENHA:-}"
 
 APP_USER=crm
 APP_HOME=/opt/crm
@@ -124,6 +127,12 @@ if [ "$ADMINS" = "0" ]; then
   passo "Primeiro administrador"
   sudo -u "$APP_USER" -H env ADMIN_COMPANY="$ADMIN_EMPRESA" ADMIN_NAME="$ADMIN_NOME" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_SENHA" \
     bash -c "cd '$APP_DIR' && npm run create-admin"
+fi
+
+if [ -n "$PLATAFORMA_EMAIL" ] && [ -n "$PLATAFORMA_SENHA" ]; then
+  passo "Acesso ao painel da plataforma"
+  sudo -u "$APP_USER" -H env PLATFORM_NAME="Dono da plataforma" PLATFORM_EMAIL="$PLATAFORMA_EMAIL" PLATFORM_PASSWORD="$PLATAFORMA_SENHA" \
+    bash -c "cd '$APP_DIR' && npm run create-platform-admin"
 fi
 
 passo "Serviço do CRM (systemd)"

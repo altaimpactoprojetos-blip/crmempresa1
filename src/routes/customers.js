@@ -3,6 +3,7 @@ const express = require('express');
 const { z } = require('zod');
 const { query, tx } = require('../db');
 const { validate } = require('../middleware/validate');
+const customFields = require('../lib/customFields');
 const { requireAuth, isManager } = require('../middleware/auth');
 const { badRequest, notFound, conflict, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
@@ -43,6 +44,7 @@ const customerSchema = z.object({
   tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   notes: z.string().max(5000).nullable().optional(),
   owner_id: z.number().int().positive().nullable().optional(),
+  custom: z.record(z.any()).optional(),
   version: z.number().int().optional(),
 });
 
@@ -350,7 +352,8 @@ router.get('/:id', async (req, res, next) => {
         [c.id],
       ),
       query(
-        `SELECT id, direction, body, status, created_at FROM whatsapp_messages WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 50`,
+        `SELECT id, status, contact_phone, last_message_at, last_message_preview, unread_count FROM conversations
+         WHERE customer_id = $1 ORDER BY last_message_at DESC NULLS LAST`,
         [c.id],
       ),
     ]);
@@ -361,7 +364,7 @@ router.get('/:id', async (req, res, next) => {
       opportunities: opps.rows,
       tasks: tasks.rows,
       notes: notes.rows,
-      whatsapp_messages: wa.rows,
+      conversations: wa.rows,
       duplicates,
     });
   } catch (err) {
@@ -372,14 +375,15 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', validate(customerSchema), async (req, res, next) => {
   try {
     const d = clean(req.data);
+    const custom = await customFields.clean('customer', d.custom);
     const dups = await findDuplicates(d.phone_digits, d.email, 0);
     if (dups.length && !req.query.force) {
       return next(conflict('Já existe um cliente com este telefone ou e-mail.', { duplicates: dups, can_force: true }));
     }
     const ownerId = d.owner_id === undefined ? (req.user.role === 'atendente' ? req.user.id : null) : d.owner_id;
     const { rows } = await query(
-      `INSERT INTO customers (name, phone, phone_digits, email, company, city, document, source, tags, notes, owner_id, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      `INSERT INTO customers (name, phone, phone_digits, email, company, city, document, source, tags, notes, owner_id, created_by, custom)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [
         d.name,
         d.phone || null,
@@ -393,6 +397,7 @@ router.post('/', validate(customerSchema), async (req, res, next) => {
         d.notes || null,
         ownerId,
         req.user.id,
+        JSON.stringify(custom),
       ],
     );
     await audit(req, 'customer_create', 'customer', rows[0].id, { name: d.name });
@@ -415,6 +420,7 @@ router.put('/:id', validate(customerSchema.partial()), async (req, res, next) =>
       return next(forbidden('Atendentes só podem alterar o responsável de seus próprios clientes.'));
     }
     const d = clean(req.data);
+    const custom = await customFields.clean('customer', d.custom, { partial: true });
     if (d.version !== undefined && d.version !== cur.version) {
       return next(
         conflict('Este cliente foi alterado por outro usuário. Recarregue a página para ver a versão atual.', {
@@ -436,7 +442,8 @@ router.put('/:id', validate(customerSchema.partial()), async (req, res, next) =>
         company = CASE WHEN $7::boolean THEN $8 ELSE company END, city = CASE WHEN $9::boolean THEN $10 ELSE city END,
         document = CASE WHEN $11::boolean THEN $12 ELSE document END, source = CASE WHEN $13::boolean THEN $14 ELSE source END,
         tags = COALESCE($15, tags), notes = CASE WHEN $16::boolean THEN $17 ELSE notes END,
-        owner_id = CASE WHEN $18::boolean THEN $19 ELSE owner_id END, version = version + 1, updated_at = now()
+        owner_id = CASE WHEN $18::boolean THEN $19 ELSE owner_id END,
+        custom = custom || COALESCE($21::jsonb, '{}'::jsonb), version = version + 1, updated_at = now()
        WHERE id = $20 RETURNING *`,
       [
         d.name ?? null,
@@ -459,6 +466,7 @@ router.put('/:id', validate(customerSchema.partial()), async (req, res, next) =>
         d.owner_id !== undefined,
         d.owner_id ?? null,
         cur.id,
+        custom ? JSON.stringify(custom) : null,
       ],
     );
     await audit(req, 'customer_update', 'customer', cur.id, { fields: Object.keys(req.data) });

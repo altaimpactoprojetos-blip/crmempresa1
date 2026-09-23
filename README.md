@@ -2,7 +2,7 @@
 
 CRM de nível intermediário para equipes de atendimento de até ~10 pessoas trabalhando simultaneamente. Interface em português do Brasil, backend próprio em Node.js e banco PostgreSQL.
 
-**Módulos:** Dashboard · Clientes · Atendimentos (fila, protocolo, rodízio) · Funil comercial (Kanban) · Tarefas e retornos · Relatórios · Configurações (identidade visual, usuários, funil, integrações, backup, auditoria).
+**Módulos:** Dashboard · Clientes · Atendimentos (fila, protocolo, rodízio) · Conversas (WhatsApp, Instagram Direct e Messenger) · Robô de atendimento · Funis comerciais (Kanban, vários por empresa) · Campos personalizados · Automações do funil · Tarefas e retornos · Relatórios · Configurações (identidade visual, usuários, funil, integrações, backup, auditoria).
 
 ## Requisitos
 
@@ -59,10 +59,51 @@ A fila é atualizada em tempo real entre os usuários (Server-Sent Events) e tod
 - **Taxa de conversão**: ganhos ÷ (ganhos + perdidos) entre oportunidades encerradas no período.
 - Atendimentos são filtrados pela data de abertura; resolvidos/ganhos/perdidos pela data de encerramento.
 
-## WhatsApp
+## WhatsApp: caixa de entrada (estilo Kommo)
 
-- O botão **Abrir WhatsApp** apenas abre a conversa no aplicativo (`wa.me`). Ele **não sincroniza mensagens** com o CRM; registre as interações manualmente no atendimento.
-- A integração com a **API oficial (Meta Cloud API)** é opcional. Sem `WHATSAPP_TOKEN` e `WHATSAPP_PHONE_NUMBER_ID`, ela aparece como *Desconectada* e nenhum envio é simulado. Com credenciais, envios e recebimentos (via webhook) ficam gravados no histórico do cliente/atendimento.
+Cada empresa conecta o **próprio número** em **Configurações › WhatsApp**, de dois jeitos:
+
+| | **QR Code** (como o WhatsApp Web) | **API oficial da Meta** (recomendado) |
+|---|---|---|
+| Como conecta | Lê o QR com o celular (Aparelhos conectados) | Token do Meta Business, passo a passo na tela |
+| Risco de bloqueio do número | **Existe** (uso não oficial; aviso exibido na tela) | Não |
+| Janela de 24h / modelos | Não se aplica | Sim |
+| Fotos e áudios | Ficam no celular/WhatsApp; o CRM só guarda a referência criptografada e busca quando alguém abre | Buscados na Meta quando alguém abre |
+| Mensagens enviadas pelo celular | Aparecem no CRM | — |
+
+A conexão por QR usa a biblioteca de código aberto [Baileys](https://github.com/WhiskeySockets/Baileys). A sessão fica no banco, criptografada, e é retomada automaticamente quando o servidor reinicia. Grupos, status e canais são ignorados.
+
+- **Conversas**: lista à esquerda, chat à direita, em tempo real. Filtros Abertas, Minhas, Sem responsável, Não lidas e Encerradas.
+- **Contato novo vira cliente e oportunidade** na primeira etapa do funil automaticamente (desativável em Configurações › Empresa). Celulares brasileiros sem o 9 extra são ligados ao cliente já cadastrado.
+- **Responsável**: conversas sem responsável ficam numa fila compartilhada; quem responde primeiro assume. Supervisores transferem.
+- **Janela de 24 horas** da Meta: depois de 24h sem mensagem do cliente, o CRM oferece os **modelos aprovados** da conta (com variáveis).
+- **Respostas rápidas** (`/atalho`, com `{nome}`), **anotações internas** (nunca enviadas ao cliente), mudança de etapa do funil e status de entrega (enviada, entregue, lida, falhou).
+- Imagens, áudios, vídeos e documentos recebidos são exibidos no chat, baixados da Meta sob demanda.
+- Segurança: tokens e sessões guardados criptografados (`ENCRYPTION_KEY`), URL de webhook secreta por número e verificação da assinatura da Meta (App Secret).
+
+Sem número conectado, nada é enviado nem simulado; o botão do cliente oferece abrir o WhatsApp no aplicativo.
+
+## Instagram Direct e Facebook Messenger
+
+Em **Configurações › WhatsApp e redes**, conecte a página do Facebook (Messenger) e/ou a conta profissional do Instagram vinculada a ela, com o token de acesso da página. As mensagens chegam na mesma tela de **Conversas**, com selo do canal, e seguem as mesmas regras: contato novo vira cliente e oportunidade, robô, automações, respostas rápidas e anotações. Fotos, vídeos e áudios não são salvos: o CRM busca na Meta quando alguém abre.
+
+Regra da Meta: resposta livre até 24h após a última mensagem do cliente; de 24h a 7 dias, a resposta vai como atendimento humano (`HUMAN_AGENT`); depois disso, só quando o cliente escrever de novo.
+
+## Robô de atendimento
+
+Em **Configurações › Robô de atendimento**: mensagem de boas-vindas, menu com até 9 opções (cada uma pode responder, encaminhar para um atendente ou para o rodízio, mudar a etapa da oportunidade e etiquetar o cliente), horário de atendimento com aviso de "fora do horário" e escolha dos canais. O robô atende contatos novos e conversas reabertas; para assim que alguém da equipe responde ou assume a conversa. Mensagens do robô aparecem no chat como "🤖 Robô".
+
+## Planos, assinatura e painel da plataforma
+
+- **Planos** com limites de usuários e canais e recursos (automações, robô). Padrão: Básico (R$ 97), Profissional (R$ 197) e Empresarial (R$ 397), editáveis no painel.
+- Cada empresa vê o plano, o uso e os pagamentos em **Assinatura** e assina pelo **Asaas** (Pix, boleto ou cartão). Teste encerrado ou pagamento atrasado (depois da tolerância) deixa só a tela de assinatura liberada.
+- **Painel do dono da plataforma** em `/plataforma` (login próprio, `npm run create-platform-admin`): receita recorrente, empresas, suspender/reativar, prorrogar teste, mudar plano, pagamentos e registro de ações. Detalhes em [docs/INSTALACAO.md](docs/INSTALACAO.md#61-painel-da-plataforma-planos-e-cobrança).
+
+## Funis, campos personalizados e automações
+
+- **Vários funis** por empresa (ex.: vendas, pós-venda, parcerias), cada um com as suas etapas, em **Configurações › Funis**. O funil **principal** recebe os contatos novos do WhatsApp. No quadro, cada funil vira uma aba.
+- **Campos personalizados** para clientes e oportunidades (texto, número, valor, data, lista, sim/não, link), em **Configurações › Campos personalizados**. Aparecem nos formulários e nas fichas. Excluir um campo só o tira dos formulários; os valores ficam guardados.
+- **Automações**: quando uma oportunidade entra em uma etapa, rodam em ordem as ações configuradas: criar tarefa, enviar WhatsApp, definir responsável (fixo ou por rodízio), adicionar etiqueta ao cliente e avisar um usuário. Os textos aceitam `{nome}`, `{primeiro_nome}`, `{oportunidade}`, `{valor}`, `{etapa}`, `{responsavel}` e `{empresa}`. Cada execução fica no **Histórico**, com o resultado de cada ação.
 
 ## Segurança
 
@@ -114,9 +155,13 @@ src/
   config.js, db.js         # variáveis de ambiente e pool PostgreSQL (query/tx)
   migrations/*.sql         # esquema do banco (aplicado por npm run migrate)
   routes/index.js          # registro central das rotas /api
-  routes/<módulo>.js       # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications, whatsapp
+  routes/<módulo>.js       # auth, users, settings, customers, tickets, pipeline, tasks, reports, notifications,
+                           # inbox (conversas), channels (WhatsApp), quickReplies, webhooks,
+                           # pipelines (funis), customFields, automations, chatbot
   middleware/              # security, session, csrf, auth, validate, errorHandler
-  lib/                     # errors, audit, notify, realtime, mailer, timezone, util
+  lib/                     # errors, audit, notify, realtime, mailer, timezone, util, companies,
+                           # inbox (mensagens recebidas), outbox (envio), whatsapp (API da Meta), waweb (QR Code),
+                           # meta (Instagram/Messenger), chatbot, crypto, customFields, automations
 public/                    # frontend (SPA sem build): index.html, css/, js/api.js, js/ui.js, js/pages/, js/app.js
 scripts/                   # migrate, create-admin, seed-demo, backup.sh, restore.sh
 tests/                     # testes de integração (node:test)

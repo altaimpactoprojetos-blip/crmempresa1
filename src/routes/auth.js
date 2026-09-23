@@ -119,7 +119,14 @@ router.post('/logout', (req, res) => {
 router.get('/me', requireAuth, (req, res) => {
   res.json({
     user: publicUser(req.user),
-    company: { id: req.user.company_id, status: req.user.company_status, trial_ends_at: req.user.trial_ends_at },
+    company: {
+      id: req.user.company_id,
+      status: req.user.company_status,
+      plan: req.user.plan,
+      trial_ends_at: req.user.trial_ends_at,
+      current_period_end: req.user.current_period_end,
+      billing_block: req.user.billing_block,
+    },
   });
 });
 

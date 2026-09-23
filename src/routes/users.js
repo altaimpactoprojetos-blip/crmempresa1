@@ -7,6 +7,7 @@ const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole, ROLES } = require('../middleware/auth');
 const { badRequest, notFound, conflict } = require('../lib/errors');
 const { audit } = require('../lib/audit');
+const { checkLimit } = require('../lib/subscription');
 const { createResetToken } = require('./auth');
 const { broadcast } = require('../lib/realtime');
 
@@ -42,6 +43,7 @@ const userSchema = z.object({
 router.post('/', requireRole('admin'), validate(userSchema.required({ password: true })), async (req, res, next) => {
   try {
     const d = req.data;
+    await checkLimit('users');
     // O e-mail identifica o login e é único entre todas as empresas.
     const dup = await runAsSystem(() => query('SELECT 1 FROM users WHERE lower(email) = lower($1)', [d.email]));
     if (dup.rowCount)
@@ -221,6 +223,8 @@ router.post(
 router.post('/:id/activate', requireRole('admin'), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    const cur = (await query('SELECT active FROM users WHERE id = $1', [id])).rows[0];
+    if (cur && !cur.active) await checkLimit('users');
     const { rowCount } = await query('UPDATE users SET active = TRUE, updated_at = now() WHERE id = $1', [id]);
     if (!rowCount) return next(notFound('Usuário não encontrado.'));
     await audit(req, 'user_activate', 'user', id);

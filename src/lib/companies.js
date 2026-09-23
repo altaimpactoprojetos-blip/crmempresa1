@@ -11,6 +11,23 @@ const DEFAULT_STAGES = [
   ['Perdido', 'lost'],
 ];
 
+// Etapas iniciais de um funil novo (sem as intermediárias do funil de vendas)
+const NEW_PIPELINE_STAGES = [
+  ['Novo', 'open'],
+  ['Em andamento', 'open'],
+  ['Concluído', 'won'],
+  ['Perdido', 'lost'],
+];
+
+async function insertStages(client, companyId, pipelineId, stages) {
+  for (const [i, [name, kind]] of stages.entries()) {
+    await client.query(
+      'INSERT INTO pipeline_stages (company_id, pipeline_id, name, position, kind) VALUES ($1,$2,$3,$4,$5)',
+      [companyId, pipelineId, name, i + 1, kind],
+    );
+  }
+}
+
 // Cria uma empresa com configurações e funil padrão e o seu primeiro administrador.
 // Deve rodar em uma transação de sistema (runAsSystem + tx), pois a empresa ainda não existe.
 async function createCompany(client, { companyName, adminName, adminEmail, adminPassword, status = 'trial' }) {
@@ -18,18 +35,17 @@ async function createCompany(client, { companyName, adminName, adminEmail, admin
   const company = (
     await client.query(
       `INSERT INTO companies (name, status, plan, trial_ends_at) VALUES ($1, $2, $3, ${trialEnds}) RETURNING *`,
-      [companyName, status, status === 'trial' ? 'trial' : 'pro'],
+      [companyName, status, status === 'trial' ? 'trial' : 'interno'],
     )
   ).rows[0];
   await client.query('INSERT INTO company_settings (company_id, name) VALUES ($1, $2)', [company.id, companyName]);
-  for (const [i, [name, kind]] of DEFAULT_STAGES.entries()) {
-    await client.query('INSERT INTO pipeline_stages (company_id, name, position, kind) VALUES ($1,$2,$3,$4)', [
-      company.id,
-      name,
-      i + 1,
-      kind,
-    ]);
-  }
+  const pipeline = (
+    await client.query(
+      `INSERT INTO pipelines (company_id, name, position, is_default) VALUES ($1, 'Funil de vendas', 1, TRUE) RETURNING id`,
+      [company.id],
+    )
+  ).rows[0];
+  await insertStages(client, company.id, pipeline.id, DEFAULT_STAGES);
   const hash = await bcrypt.hash(adminPassword, 12);
   const admin = (
     await client.query(
@@ -46,4 +62,4 @@ async function createCompany(client, { companyName, adminName, adminEmail, admin
   return { company, admin };
 }
 
-module.exports = { createCompany, DEFAULT_STAGES };
+module.exports = { createCompany, insertStages, DEFAULT_STAGES, NEW_PIPELINE_STAGES };

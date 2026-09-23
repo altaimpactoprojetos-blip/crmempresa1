@@ -16,9 +16,9 @@ app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(securityHeaders);
 
-// Corpo das requisições. O webhook do WhatsApp guarda o corpo bruto para validar a assinatura.
+// Corpo das requisições. Webhooks guardam o corpo bruto para validar a assinatura.
 app.use(
-  '/api/whatsapp/webhook',
+  '/api/webhooks',
   express.json({
     verify: (req, _res, buf) => {
       req.rawBody = buf;
@@ -34,6 +34,8 @@ app.use('/api', csrfGuard, loadUser, apiRoutes, apiNotFound);
 
 // Frontend estático (SPA): qualquer outra rota devolve o index.html.
 app.use(express.static(PUBLIC_DIR, { maxAge: config.env === 'production' ? '1h' : 0, etag: true }));
+// Painel do dono da plataforma (página separada do CRM das empresas)
+app.get('/plataforma', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'plataforma.html')));
 app.get('*', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 app.use(errorHandler);

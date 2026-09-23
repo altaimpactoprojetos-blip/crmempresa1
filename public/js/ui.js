@@ -58,6 +58,12 @@ UI.initials = (name) =>
     .toUpperCase();
 UI.waLink = (phoneDigits) => (phoneDigits ? `https://wa.me/${phoneDigits}` : null);
 UI.digits = (s) => String(s || '').replace(/\D+/g, '');
+// Telefone com DDI para exibição: 5511987654321 -> +55 11 98765-4321
+UI.fmtPhone = (s) => {
+  const d = UI.digits(s);
+  const br = /^55(\d{2})(\d{4,5})(\d{4})$/.exec(d);
+  return br ? `+55 ${br[1]} ${br[2]}-${br[3]}` : d ? `+${d}` : '';
+};
 
 UI.STATUS = {
   aguardando: { label: 'Aguardando atendimento', cls: 'warning' },
@@ -95,6 +101,9 @@ UI.err = (e) => UI.toast(e instanceof Error ? e.message : String(e), 'error', 60
 UI.empty = (title, text) => `<div class="empty"><strong>${UI.esc(title)}</strong>${text ? UI.esc(text) : ''}</div>`;
 
 // Modal genérico. Retorna { el, close }.
+UI.openModals = new Set();
+// Ao trocar de página, janelas abertas da página anterior são fechadas
+UI.closeModals = () => [...UI.openModals].forEach((close) => close());
 UI.modal = ({ title, body, footer, size = '', onClose }) => {
   const back = document.createElement('div');
   back.className = 'modal-backdrop';
@@ -104,6 +113,7 @@ UI.modal = ({ title, body, footer, size = '', onClose }) => {
     ${footer !== null ? `<div class="modal-footer">${footer || ''}</div>` : ''}
   </div>`;
   const close = () => {
+    UI.openModals.delete(close);
     back.remove();
     document.removeEventListener('keydown', onKey);
     if (onClose) onClose();
@@ -116,6 +126,7 @@ UI.modal = ({ title, body, footer, size = '', onClose }) => {
   });
   document.addEventListener('keydown', onKey);
   document.body.appendChild(back);
+  UI.openModals.add(close);
   const first = back.querySelector('input, select, textarea');
   if (first) setTimeout(() => first.focus(), 30);
   return { el: back, close };
@@ -183,6 +194,12 @@ UI.formData = (form) => {
         : [];
     if (t === 'nullable' && v === '') v = null;
     if (t === 'money') v = v === '' || v === null ? 0 : Number(String(v).replace(/\./g, '').replace(',', '.'));
+    if (el.name.startsWith('custom.')) {
+      // Campos personalizados vão agrupados em { custom: { chave: valor } }
+      out.custom = out.custom || {};
+      out.custom[el.name.slice(7)] = v;
+      continue;
+    }
     out[el.name] = v;
   }
   return out;
@@ -217,6 +234,60 @@ UI.showErrors = (form, err) => {
   }
   if (!Object.keys(fields).length && err) UI.err(err);
 };
+
+// ---------- Campos personalizados ----------
+UI.customInputs = (defs, values = {}) =>
+  defs
+    .map((d) => {
+      const name = `custom.${d.key}`;
+      const v = values ? values[d.key] : null;
+      let input;
+      switch (d.type) {
+        case 'textarea':
+          input = UI.textarea(name, v ?? '', 'rows="3" data-type="nullable"');
+          break;
+        case 'number':
+        case 'money':
+          input = UI.input(
+            name,
+            v ?? '',
+            `inputmode="decimal" data-type="nullable"${d.type === 'money' ? ' placeholder="0,00"' : ''}`,
+          );
+          break;
+        case 'date':
+          input = `<input type="date" name="${name}" value="${UI.attr(v || '')}" data-type="nullable">`;
+          break;
+        case 'select':
+          input = UI.select(name, [['', '—'], ...d.options.map((o) => [o, o])], v ?? '', 'data-type="nullable"');
+          break;
+        case 'checkbox':
+          return `<div class="field"><label class="check"><input type="checkbox" name="${name}" ${v ? 'checked' : ''}> ${UI.esc(d.label)}</label><div class="error"></div></div>`;
+        case 'url':
+          input = UI.input(name, v ?? '', 'type="url" placeholder="https://" data-type="nullable"');
+          break;
+        default:
+          input = UI.input(name, v ?? '', 'data-type="nullable"');
+      }
+      return UI.field(name, d.label, input, { required: d.required });
+    })
+    .join('');
+
+UI.customValue = (d, v) => {
+  if (v == null || v === '') return '—';
+  if (d.type === 'checkbox') return v ? 'Sim' : 'Não';
+  if (d.type === 'money') return UI.fmtMoney(v);
+  if (d.type === 'number') return Number(v).toLocaleString('pt-BR');
+  if (d.type === 'date') return UI.fmtDate(`${v}T12:00:00`);
+  if (d.type === 'url') return `<a href="${UI.attr(v)}" target="_blank" rel="noopener noreferrer">${UI.esc(v)}</a>`;
+  return UI.esc(v);
+};
+
+// Linhas de tabela (<tr>) com os valores preenchidos
+UI.customRows = (defs, values = {}) =>
+  defs
+    .filter((d) => values && values[d.key] != null && values[d.key] !== '')
+    .map((d) => `<tr><th>${UI.esc(d.label)}</th><td>${UI.customValue(d, values[d.key])}</td></tr>`)
+    .join('');
 
 UI.field = (name, label, input, { required = false, hint = '' } = {}) =>
   `<div class="field"><label>${UI.esc(label)}${required ? ' <span class="req">*</span>' : ''}</label>${input}${hint ? `<div class="hint">${UI.esc(hint)}</div>` : ''}<div class="error"></div></div>`;
@@ -256,6 +327,8 @@ UI.icons = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>',
   customers:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  inbox:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
   tickets:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   pipeline:
@@ -269,6 +342,23 @@ UI.icons = {
   search:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>',
   bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  logout:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>',
+  clock:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
+  check:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>',
+  alert:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>',
+  money:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+  target:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+  hourglass:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4.17a2 2 0 0 0-.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22M7 2v4.17a2 2 0 0 0 .59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M3 12h18M3 6h18M3 18h18"/></svg>',
 };
 

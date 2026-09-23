@@ -84,8 +84,9 @@ CRM.pages.customers = {
   },
 
   // Formulário de criação/edição
-  form(c = null, onSaved) {
+  async form(c = null, onSaved) {
     const isEdit = Boolean(c);
+    const defs = (await CRM.loadCustomFields()).customer;
     const canOwner = CRM.isManager() || !isEdit || c.owner_id === CRM.user.id || !c.owner_id;
     const m = UI.modal({
       title: isEdit ? 'Editar cliente' : 'Novo cliente',
@@ -97,6 +98,7 @@ CRM.pages.customers = {
         ${UI.field('source', 'Origem do contato', UI.select('source', [['', '— Selecione —'], ...(this.sources || []).map((s) => [s, s])], c?.source, 'data-type="nullable"'))}</div>
       <div class="form-row">${UI.field('tags', 'Etiquetas', UI.input('tags', (c?.tags || []).join(', '), 'data-type="tags" placeholder="vip, revenda"'), { hint: 'Separe por vírgula' })}
         ${UI.field('owner_id', 'Responsável', UI.select('owner_id', UI.userOptions(CRM.users, { filter: CRM.isManager() ? null : (u) => u.id === CRM.user.id }), c ? c.owner_id : CRM.user.role === 'atendente' ? CRM.user.id : '', `data-type="int" ${canOwner ? '' : 'disabled'}`))}</div>
+      ${defs.length ? `<div class="form-row">${UI.customInputs(defs, c?.custom)}</div>` : ''}
       ${UI.field('notes', 'Observações', UI.textarea('notes', c?.notes, 'data-type="nullable"'))}
       ${isEdit ? `<input type="hidden" name="version" value="${c.version}" data-type="int">` : ''}</form>`,
       footer: `<button class="btn secondary" data-close>Cancelar</button><button class="btn" type="submit" form="custForm">${isEdit ? 'Salvar alterações' : 'Cadastrar'}</button>`,
@@ -147,7 +149,7 @@ CRM.pages.customers = {
   },
 
   async detail(el, id) {
-    const r = await api(`/customers/${id}`);
+    const [r, fieldDefs] = await Promise.all([api(`/customers/${id}`), CRM.loadCustomFields()]);
     const c = r.customer;
     this.current = c;
     const phone = UI.digits(c.phone);
@@ -157,12 +159,12 @@ CRM.pages.customers = {
       CRM.pageHeader(
         c.name,
         [c.company, c.city, c.source ? `Origem: ${c.source}` : ''].filter(Boolean).join(' · '),
-        `${wa ? `<a class="btn wa" href="${wa}" target="_blank" rel="noopener" title="Abre o WhatsApp Web/desktop. Esta ação não sincroniza mensagens com o CRM.">Abrir WhatsApp</a>` : ''}
+        `${phone ? '<button class="btn wa" id="btnChat" title="Abre a conversa na caixa de entrada do CRM (API oficial do WhatsApp)">Conversar no WhatsApp</button>' : ''}
        <button class="btn secondary" id="btnTicket">Abrir atendimento</button><button class="btn secondary" id="btnOpp">Nova oportunidade</button><button class="btn secondary" id="btnTask">Nova tarefa</button><button class="btn" id="btnEdit">Editar</button>`,
       ) +
       `${r.duplicates.length ? `<div class="alert warning">Possível duplicidade com: ${r.duplicates.map((d) => `<a href="#/clientes/${d.id}">#${d.id} ${UI.esc(d.name)}</a>`).join(', ')}.</div>` : ''}
      ${pendingFollow ? `<div class="alert info">Retorno pendente em <strong>${UI.fmtDateTime(pendingFollow.follow_up_at)}</strong> — atendimento <a href="#/atendimentos/${pendingFollow.id}">${UI.esc(pendingFollow.protocol)}</a>.</div>` : ''}
-     ${wa ? '<p class="muted small">O botão "Abrir WhatsApp" apenas abre a conversa no aplicativo; as mensagens trocadas lá não são gravadas no CRM. Registre as interações no atendimento.</p>' : ''}
+     ${wa ? `<p class="muted small">Sem WhatsApp conectado ao CRM? <a href="${wa}" target="_blank" rel="noopener">Abrir no aplicativo do WhatsApp</a> (as mensagens trocadas lá não são gravadas no CRM).</p>` : ''}
     <div class="grid" style="grid-template-columns: 320px 1fr">
       <div class="stack"><div class="card"><h3>Dados</h3>
         <table class="small"><tbody>
@@ -170,11 +172,12 @@ CRM.pages.customers = {
           <tr><th>Empresa</th><td>${UI.esc(c.company || '—')}</td></tr><tr><th>Cidade</th><td>${UI.esc(c.city || '—')}</td></tr>
           <tr><th>CPF/CNPJ</th><td>${UI.esc(c.document || '—')}</td></tr><tr><th>Origem</th><td>${UI.esc(c.source || '—')}</td></tr>
           <tr><th>Responsável</th><td>${UI.esc(c.owner_name || '—')}</td></tr><tr><th>Etiquetas</th><td>${(c.tags || []).map((t) => `<span class="tag">${UI.esc(t)}</span>`).join('') || '—'}</td></tr>
+          ${UI.customRows(fieldDefs.customer, c.custom)}
           <tr><th>Cadastro</th><td>${UI.fmtDateTime(c.created_at)}</td></tr></tbody></table>
         ${c.notes ? `<h4 class="mt">Observações</h4><p class="small" style="white-space:pre-wrap">${UI.esc(c.notes)}</p>` : ''}</div>
         <div class="card"><h3>Anotações internas</h3><form id="noteForm"><textarea name="body" placeholder="Escreva uma anotação visível apenas para a equipe" required></textarea><div class="right mt"><button class="btn sm">Adicionar</button></div></form>
           <ul class="timeline mt">${r.notes.map((n) => `<li class="note"><span class="tl-dot"></span><div><div class="tl-meta">${UI.esc(n.user_name || '')} · ${UI.fmtDateTime(n.created_at)}</div><div class="tl-body">${UI.esc(n.body)}</div></div></li>`).join('') || '<li class="muted small">Nenhuma anotação.</li>'}</ul></div>
-        ${r.whatsapp_messages.length ? `<div class="card"><h3>WhatsApp (API oficial)</h3><ul class="timeline">${r.whatsapp_messages.map((w) => `<li class="interaction"><span class="tl-dot"></span><div><div class="tl-meta">${w.direction === 'saida' ? 'Enviada' : 'Recebida'} · ${UI.fmtDateTime(w.created_at)} · ${UI.esc(w.status)}</div><div class="tl-body">${UI.esc(w.body || '')}</div></div></li>`).join('')}</ul></div>` : ''}
+        ${r.conversations.length ? `<div class="card"><h3>Conversas no WhatsApp</h3><ul class="timeline">${r.conversations.map((w) => `<li class="interaction"><span class="tl-dot"></span><div><div class="tl-meta"><a href="#/conversas/${w.id}">${UI.esc(UI.fmtPhone(w.contact_phone))}</a> · ${w.status === 'open' ? 'Aberta' : 'Encerrada'} · ${UI.fmtDateTime(w.last_message_at)}${w.unread_count ? ` · <span class="badge success">${w.unread_count} não lida(s)</span>` : ''}</div><div class="tl-body">${UI.esc(w.last_message_preview || '')}</div></div></li>`).join('')}</ul></div>` : ''}
       </div>
       <div class="stack">
         <div class="card"><div class="card-title"><h3>Atendimentos (${r.tickets.length})</h3></div>
@@ -185,6 +188,16 @@ CRM.pages.customers = {
           ${r.tasks.length ? `<table><tbody>${r.tasks.map((t) => `<tr><td>${t.done_at ? '✅ ' : ''}${UI.esc(t.title)}</td><td class="small">${UI.esc(t.assignee_name || '')}</td><td class="small nowrap ${!t.done_at && t.due_at && new Date(t.due_at) < Date.now() ? 'badge danger' : ''}">${UI.fmtDateTime(t.due_at)}</td><td>${UI.priorityBadge(t.priority)}</td></tr>`).join('')}</tbody></table>` : UI.empty('Nenhuma tarefa', '')}</div>
       </div></div>`;
     el.querySelector('#btnEdit').onclick = () => this.form(c);
+    const chatBtn = el.querySelector('#btnChat');
+    if (chatBtn)
+      chatBtn.onclick = async () => {
+        try {
+          const r = await api('/inbox/conversations', { method: 'POST', body: { customer_id: c.id } });
+          location.hash = `#/conversas/${r.conversation.id}`;
+        } catch (err) {
+          UI.err(err);
+        }
+      };
     el.querySelector('#btnTicket').onclick = () => CRM.pages.tickets.form({ customer: c }, () => this.detail(el, id));
     el.querySelector('#btnOpp').onclick = () => CRM.pages.pipeline.form({ customer: c }, () => this.detail(el, id));
     el.querySelector('#btnTask').onclick = () =>

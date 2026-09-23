@@ -86,7 +86,14 @@ function renderAuth(view = 'login', param) {
     <button class="btn" style="width:100%">Entrar</button></form>
     <p class="center mt small"><a href="#/esqueci-senha">Esqueci minha senha</a></p>
     ${CRM.product.allow_signup ? '<p class="center small">Ainda não tem conta? <a href="#/criar-conta">Criar conta grátis</a></p>' : ''}`;
-  root.innerHTML = `<div class="auth-wrap"><div class="auth-card">${brandHtml()}${CRM.settings && CRM.settings.demo_mode ? '<div class="alert warning small">Modo de demonstração: os dados são fictícios.</div>' : ''}${body}</div></div>`;
+  const title = view === 'login' ? '<h2>Entrar</h2><p class="muted small">Acesse a sua conta para continuar.</p>' : '';
+  root.innerHTML = `<div class="auth-wrap">
+    <aside class="auth-side">${brandHtml()}
+      <div><h2>Atendimento e vendas pelo WhatsApp, num só lugar.</h2>
+      <p>Toda a equipe conversando com os clientes, cada contato virando oportunidade no funil e nada se perdendo.</p>
+      <ul class="auth-points"><li>Caixa de entrada do WhatsApp compartilhada pela equipe</li><li>Funil de vendas com arrastar e soltar</li><li>Tarefas, retornos e relatórios de desempenho</li></ul></div>
+      <div class="foot">${UI.esc(CRM.product.app_name || 'CRM')}</div></aside>
+    <main class="auth-main"><div class="auth-card">${brandHtml()}${CRM.settings && CRM.settings.demo_mode ? '<div class="alert warning small">Modo de demonstração: os dados são fictícios.</div>' : ''}${title}${body}</div></main></div>`;
   const form = root.querySelector('#authForm');
   form.onsubmit = async (e) => {
     e.preventDefault();
@@ -129,48 +136,98 @@ function renderAuth(view = 'login', param) {
 
 // ---------- Layout ----------
 const NAV = [
+  ['Principal'],
   ['#/', 'Dashboard', 'dashboard'],
+  ['#/conversas', 'Conversas', 'inbox'],
   ['#/clientes', 'Clientes', 'customers'],
   ['#/atendimentos', 'Atendimentos', 'tickets'],
+  ['Vendas'],
   ['#/funil', 'Funil', 'pipeline'],
   ['#/tarefas', 'Tarefas', 'tasks'],
   ['#/relatorios', 'Relatórios', 'reports'],
+  ['Empresa'],
   ['#/configuracoes', 'Configurações', 'settings'],
+  ['#/assinatura', 'Assinatura', 'money', 'admin'],
 ];
+const navHtml = () =>
+  NAV.filter(([, , , only]) => only !== 'admin' || CRM.isAdmin())
+    .map(([h, l, i]) =>
+      l
+        ? `<a href="${h}" data-nav="${h}">${UI.icons[i]}<span>${l}</span><span class="badge" data-nav-badge="${h}" hidden></span></a>`
+        : `<div class="nav-section">${h}</div>`,
+    )
+    .join('');
 
-function trialBannerHtml() {
+function planChipHtml() {
   const c = CRM.company;
-  if (!c || c.status !== 'trial' || !c.trial_ends_at) return '';
-  const days = Math.max(0, Math.ceil((new Date(c.trial_ends_at) - Date.now()) / 86400000));
-  const text =
-    days > 0
-      ? `Período de teste: ${days} ${days === 1 ? 'dia restante' : 'dias restantes'}.`
-      : 'Seu período de teste terminou.';
-  return `<div class="trial-banner">${text}</div>`;
+  if (!c) return '';
+  const chip = (title, text, cls = '') =>
+    `<a class="plan-chip ${cls}" href="#/assinatura"><strong>${title}</strong>${text}</a>`;
+  if (c.billing_block) return chip('Acesso bloqueado', 'Regularize a assinatura', 'danger');
+  if (c.status === 'past_due') return chip('Pagamento em atraso', 'Clique para regularizar', 'warning');
+  if (c.status === 'trial' && c.trial_ends_at) {
+    const days = Math.max(0, Math.ceil((new Date(c.trial_ends_at) - Date.now()) / 86400000));
+    return chip('Período de teste', `${days} ${days === 1 ? 'dia restante' : 'dias restantes'} · Assinar`);
+  }
+  return '';
 }
 
+CRM.planChipHtml = planChipHtml;
+
+// Empresa bloqueada (teste encerrado ou pagamento atrasado): tudo leva à tela de assinatura
+CRM.onBillingBlocked = (data) => {
+  if (!CRM.company) return;
+  const changed = !CRM.company.billing_block;
+  CRM.company.billing_block = data.reason || 'blocked';
+  if (!location.hash.startsWith('#/assinatura')) location.hash = '#/assinatura';
+  else if (changed) route();
+  if (changed && root.querySelector('#app')) {
+    // Menu lateral passa a mostrar o aviso de bloqueio
+    const footer = root.querySelector('.sidebar-footer');
+    if (footer) footer.innerHTML = planChipHtml();
+    else
+      root
+        .querySelector('#sidebar')
+        .insertAdjacentHTML('beforeend', `<div class="sidebar-footer">${planChipHtml()}</div>`);
+  }
+};
+
 function renderShell() {
+  const u = CRM.user;
   root.innerHTML = `<div id="app">
     <aside class="sidebar" id="sidebar">${brandHtml()}
-      <nav class="nav" id="nav">${NAV.map(([h, l, i]) => `<a href="${h}" data-nav="${h}">${UI.icons[i]}<span>${l}</span><span class="badge" data-nav-badge="${h}" hidden></span></a>`).join('')}</nav>
-      <div class="sidebar-footer"><div class="user">${UI.esc(CRM.user.name)}</div><div>${UI.ROLE[CRM.user.role]} · <a href="#/perfil" style="color:#93c5fd">Meu perfil</a> · <a href="#" id="logout" style="color:#93c5fd">Sair</a></div></div>
+      <nav class="nav" id="nav">${navHtml()}</nav>
+      ${planChipHtml() ? `<div class="sidebar-footer">${planChipHtml()}</div>` : ''}
     </aside>
     <div class="main">
       ${CRM.settings.demo_mode ? '<div class="demo-banner">Modo de demonstração — os dados exibidos são fictícios. Desative em Configurações › Empresa.</div>' : ''}
-      ${trialBannerHtml()}
       <header class="topbar">
         <button class="icon-btn menu-toggle" id="menuToggle" aria-label="Menu">${UI.icons.menu}</button>
-        <div class="search">${UI.icons.search}<input id="globalSearch" placeholder="Buscar cliente, protocolo, telefone..." autocomplete="off"><div class="search-results" id="searchResults" hidden></div></div>
+        <div class="search">${UI.icons.search}<input id="globalSearch" placeholder="Buscar cliente, protocolo, telefone..." autocomplete="off"><span class="kbd">/</span><div class="search-results" id="searchResults" hidden></div></div>
         <div class="grow"></div>
-        ${CRM.user.role === 'atendente' ? `<label class="avail-toggle" title="Disponível para receber atendimentos na distribuição automática"><span class="dot ${CRM.user.available ? 'on' : 'off'}" id="availDot"></span><input type="checkbox" id="availToggle" ${CRM.user.available ? 'checked' : ''}> Disponível</label>` : ''}
+        ${u.role === 'atendente' ? `<label class="avail-toggle" title="Disponível para receber atendimentos na distribuição automática"><span class="dot ${u.available ? 'on' : 'off'}" id="availDot"></span><input type="checkbox" id="availToggle" ${u.available ? 'checked' : ''}><span class="label">Disponível</span></label>` : ''}
         <button class="icon-btn notif-btn" id="notifBtn" aria-label="Notificações">${UI.icons.bell}<span class="count" id="notifCount" hidden></span></button>
+        <div class="user-menu"><button class="user-btn" id="userBtn" aria-haspopup="true"><span class="avatar">${UI.esc(UI.initials(u.name))}</span><span class="who"><strong>${UI.esc(u.name)}</strong><span>${UI.ROLE[u.role]}</span></span></button>
+          <div class="dropdown" id="userMenu" hidden>
+            <div class="small muted" style="padding:0.4rem 0.7rem">${UI.esc(u.email)}</div><hr>
+            <a href="#/perfil">${UI.icons.user}Meu perfil</a>
+            ${CRM.isAdmin() ? `<a href="#/configuracoes">${UI.icons.settings}Configurações</a>` : ''}
+            <hr><button id="logout">${UI.icons.logout}Sair</button>
+          </div></div>
       </header>
       <main class="content" id="content"></main>
     </div></div>`;
+  const menu = root.querySelector('#userMenu');
+  root.querySelector('#userBtn').onclick = (e) => {
+    e.stopPropagation();
+    menu.hidden = !menu.hidden;
+  };
+  document.addEventListener('click', () => (menu.hidden = true));
   root.querySelector('#logout').onclick = async (e) => {
     e.preventDefault();
     await api('/auth/logout', { method: 'POST' });
     CRM.user = null;
+    CRM.company = null;
     location.hash = '#/login';
     renderAuth();
   };
@@ -199,12 +256,15 @@ function renderShell() {
 }
 
 async function refreshBadges() {
+  if (CRM.company && CRM.company.billing_block) return;
   try {
-    const [q, t, n] = await Promise.all([
+    const [q, t, n, inbox] = await Promise.all([
       api('/tickets', { query: { queue: 'true', limit: 1 } }),
       api('/tasks', { query: { view: 'overdue' } }),
       api('/notifications'),
+      api('/inbox/summary'),
     ]);
+    setBadge('#/conversas', inbox.unread, 'success');
     setBadge('#/atendimentos', q.total, 'warning');
     setBadge('#/tarefas', t.summary.overdue, 'danger');
     CRM.unread = n.unread;
@@ -276,7 +336,7 @@ function connectRealtime() {
   }, 400);
   es.addEventListener('tickets_changed', refresh);
   es.addEventListener('pipeline_changed', refresh);
-  es.addEventListener('whatsapp_message', refresh);
+  es.addEventListener('inbox_changed', refresh);
   es.addEventListener('settings_changed', async () => {
     CRM.settings = (await api('/settings/public')).settings;
     applyBranding();
@@ -317,6 +377,12 @@ function setupSearch() {
     }
   }, 250);
   input.oninput = run;
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && !e.target.closest('input, textarea, select, [contenteditable]')) {
+      e.preventDefault();
+      input.focus();
+    }
+  });
   input.onkeydown = (e) => {
     if (e.key === 'Escape') {
       box.hidden = true;
@@ -358,8 +424,14 @@ async function route() {
     return;
   }
   if (!root.querySelector('#app')) renderShell();
+  UI.closeModals();
+  if (CRM.company && CRM.company.billing_block && !['assinatura', 'perfil'].includes(p0)) {
+    location.hash = '#/assinatura';
+    return;
+  }
   const map = {
     '': 'dashboard',
+    conversas: 'inbox',
     clientes: 'customers',
     atendimentos: 'tickets',
     funil: 'pipeline',
@@ -367,6 +439,7 @@ async function route() {
     relatorios: 'reports',
     configuracoes: 'settings',
     perfil: 'profile',
+    assinatura: 'billing',
   };
   const key = map[p0];
   root.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === `#/${p0}`));
@@ -384,6 +457,18 @@ async function route() {
     content.innerHTML = `<div class="alert danger">${UI.esc(err.message)}</div>`;
   }
 }
+
+// Definições de campos personalizados (em cache até mudarem nas Configurações)
+CRM.loadCustomFields = async (force = false) => {
+  if (!CRM.customFields || force) {
+    const { fields } = await api('/custom-fields');
+    CRM.customFields = {
+      customer: fields.filter((f) => f.entity === 'customer'),
+      opportunity: fields.filter((f) => f.entity === 'opportunity'),
+    };
+  }
+  return CRM.customFields;
+};
 
 CRM.loadUsers = async () => {
   CRM.users = (await api('/users')).users;

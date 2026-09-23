@@ -7,13 +7,29 @@ CRM.pages.settings = {
     const tabs = [
       ['empresa', 'Empresa'],
       ['usuarios', 'Usuários'],
-      ['funil', 'Funil'],
+      ['funil', 'Funis'],
+      ['campos', 'Campos personalizados'],
+      ['automacoes', 'Automações'],
+      ['whatsapp', 'WhatsApp e redes'],
+      ['robo', 'Robô de atendimento'],
+      ['respostas', 'Respostas rápidas'],
       ['canais', 'Canais e origens'],
       ['integracoes', 'Integrações'],
       ['backup', 'Backup'],
       ['auditoria', 'Auditoria'],
     ];
-    const visible = CRM.isAdmin() ? tabs : tabs.filter(([k]) => ['integracoes', 'auditoria', 'funil'].includes(k));
+    const visible = CRM.isAdmin()
+      ? tabs
+      : tabs.filter(([k]) =>
+          [
+            'respostas',
+            'integracoes',
+            'auditoria',
+            'funil',
+            'campos',
+            ...(CRM.isManager() ? ['automacoes'] : []),
+          ].includes(k),
+        );
     this.tab = sub && visible.some(([k]) => k === sub) ? sub : visible[0][0];
     el.innerHTML =
       CRM.pageHeader(
@@ -37,6 +53,7 @@ CRM.pages.settings = {
         <div class="form-row">${UI.field('primary_color', 'Cor principal', `<div class="flex"><input type="color" class="color-swatch" id="pc" value="${s.primary_color}"><input name="primary_color" value="${s.primary_color}" pattern="^#[0-9a-fA-F]{6}$"></div>`)}${UI.field('accent_color', 'Cor de destaque', `<div class="flex"><input type="color" class="color-swatch" id="ac" value="${s.accent_color}"><input name="accent_color" value="${s.accent_color}" pattern="^#[0-9a-fA-F]{6}$"></div>`)}</div>
         ${UI.field('timezone', 'Fuso horário', UI.input('timezone', s.timezone), { hint: 'Ex.: America/Sao_Paulo' })}
         <label class="check"><input type="checkbox" name="auto_distribution" ${s.auto_distribution ? 'checked' : ''}> Distribuição automática em rodízio ao abrir atendimentos sem responsável</label>
+        <label class="check mt"><input type="checkbox" name="inbox_auto_lead" ${s.inbox_auto_lead ? 'checked' : ''}> Criar oportunidade no funil automaticamente para cada nova conversa no WhatsApp</label>
         <label class="check mt"><input type="checkbox" name="demo_mode" ${s.demo_mode ? 'checked' : ''}> Modo de demonstração (exibe aviso de dados fictícios)</label></div>
       <div><label>Logotipo</label><img class="logo-preview" id="logoPrev" src="${UI.attr(s.logo_data || '')}" alt="" ${s.logo_data ? '' : 'hidden'}><div class="field mt"><input type="file" id="logoFile" accept="image/png,image/jpeg,image/svg+xml,image/webp"><div class="hint">PNG, JPEG, WEBP ou SVG, até 300KB.</div></div><button type="button" class="btn ghost sm" id="logoClear">Remover logotipo</button></div></div>
       <div class="right mt"><button class="btn">Salvar</button></div></form></div>`;
@@ -201,9 +218,14 @@ CRM.pages.settings = {
     };
   },
 
-  funil(box) {
-    const stages = this.data.stages.filter((s) => s.active);
+  // ---------- Funis e etapas ----------
+  async funil(box) {
+    const pipelines = (await api('/pipelines')).pipelines;
     const ro = !CRM.isAdmin();
+    if (!pipelines.some((p) => p.id === this.pipelineSel))
+      this.pipelineSel = (pipelines.find((p) => p.is_default) || pipelines[0]).id;
+    const current = pipelines.find((p) => p.id === this.pipelineSel);
+    const stages = current.stages.filter((s) => s.active);
     const row = (s = { name: '', kind: 'open' }) =>
       `<tr data-id="${s.id || ''}"><td><input name="name" value="${UI.attr(s.name)}" required ${ro ? 'readonly' : ''}></td><td>${UI.select(
         'kind',
@@ -215,10 +237,51 @@ CRM.pages.settings = {
         s.kind,
         ro ? 'disabled' : '',
       )}</td><td class="nowrap">${ro ? '' : '<button type="button" class="icon-btn" data-up>↑</button><button type="button" class="icon-btn" data-down>↓</button><button type="button" class="icon-btn" data-rm title="Remover">🗑</button>'}</td></tr>`;
-    box.innerHTML = `<div class="card"><h3>Etapas do funil</h3><p class="muted small">Ordene as etapas; é obrigatório ter exatamente uma etapa "Ganho" e uma "Perdido". Etapas removidas que já possuem oportunidades ficam apenas ocultas.</p>
+    box.innerHTML = `<div class="card"><div class="flex between wrap"><div><h3>Funis</h3><p class="muted small">Separe processos diferentes (ex.: vendas, pós-venda, parcerias). O funil <b>principal</b> recebe os contatos novos do WhatsApp.</p></div>
+      ${ro ? '' : '<button class="btn sm" id="newPipe">+ Novo funil</button>'}</div>
+      <div class="tabs" id="pipeSel">${pipelines.map((p) => `<button data-id="${p.id}" class="${p.id === current.id ? 'active' : ''}">${UI.esc(p.name)}${p.is_default ? ' <span class="badge primary">principal</span>' : ''}</button>`).join('')}</div>
+      ${ro ? '' : `<div class="flex wrap"><button class="btn secondary sm" id="renPipe">Renomear</button>${current.is_default ? '' : '<button class="btn secondary sm" id="defPipe">Tornar principal</button><button class="btn ghost sm" id="delPipe">Excluir funil</button>'}</div>`}</div>
+      <div class="card"><h3>Etapas de "${UI.esc(current.name)}"</h3><p class="muted small">Ordene as etapas; é obrigatório ter exatamente uma etapa "Ganho" e uma "Perdido". Etapas removidas que já possuem oportunidades ficam apenas ocultas.</p>
       <form id="stForm"><table><thead><tr><th>Nome</th><th>Tipo</th><th></th></tr></thead><tbody id="stBody">${stages.map(row).join('')}</tbody></table>
       ${ro ? '' : '<div class="flex between mt"><button type="button" class="btn secondary sm" id="addSt">+ Adicionar etapa</button><button class="btn">Salvar etapas</button></div>'}</form></div>`;
+    box.querySelector('#pipeSel').onclick = (e) => {
+      const b = e.target.closest('button[data-id]');
+      if (!b) return;
+      this.pipelineSel = Number(b.dataset.id);
+      this.funil(box);
+    };
     if (ro) return;
+    const call = async (fn) => {
+      try {
+        const r = await fn();
+        if (r) UI.ok(r.message);
+        this.funil(box);
+      } catch (err) {
+        UI.err(err);
+      }
+    };
+    box.querySelector('#newPipe').onclick = async () => {
+      const name = await UI.prompt('Nome do novo funil', { title: 'Novo funil', placeholder: 'ex.: Pós-venda' });
+      if (!name) return;
+      call(async () => {
+        const r = await api('/pipelines', { method: 'POST', body: { name } });
+        this.pipelineSel = r.pipeline.id;
+        return r;
+      });
+    };
+    box.querySelector('#renPipe').onclick = async () => {
+      const name = await UI.prompt('Novo nome do funil', { title: 'Renomear funil', placeholder: current.name });
+      if (name) call(() => api(`/pipelines/${current.id}`, { method: 'PUT', body: { name } }));
+    };
+    const def = box.querySelector('#defPipe');
+    if (def)
+      def.onclick = () => call(() => api(`/pipelines/${current.id}`, { method: 'PUT', body: { is_default: true } }));
+    const del = box.querySelector('#delPipe');
+    if (del)
+      del.onclick = async () => {
+        if (await UI.confirm(`Excluir o funil "${current.name}" e suas etapas?`, { danger: true, okLabel: 'Excluir' }))
+          call(() => api(`/pipelines/${current.id}`, { method: 'DELETE' }));
+      };
     const body = box.querySelector('#stBody');
     box.querySelector('#addSt').onclick = () => body.insertAdjacentHTML('beforeend', row());
     body.onclick = (e) => {
@@ -228,20 +291,454 @@ CRM.pages.settings = {
       if (e.target.closest('[data-up]') && tr.previousElementSibling) tr.previousElementSibling.before(tr);
       if (e.target.closest('[data-down]') && tr.nextElementSibling) tr.nextElementSibling.after(tr);
     };
-    box.querySelector('#stForm').onsubmit = async (e) => {
+    box.querySelector('#stForm').onsubmit = (e) => {
       e.preventDefault();
       const list = [...body.querySelectorAll('tr')].map((tr) => ({
         id: tr.dataset.id ? Number(tr.dataset.id) : undefined,
         name: tr.querySelector('[name=name]').value.trim(),
         kind: tr.querySelector('[name=kind]').value,
       }));
+      call(() => api('/settings/stages', { method: 'PUT', body: { pipeline_id: current.id, stages: list } }));
+    };
+  },
+
+  // ---------- Campos personalizados ----------
+  async campos(box) {
+    const { fields } = await api('/custom-fields');
+    const ro = !CRM.isAdmin();
+    const typeLabels = {
+      text: 'Texto',
+      textarea: 'Texto longo',
+      number: 'Número',
+      money: 'Valor (R$)',
+      date: 'Data',
+      select: 'Lista de opções',
+      checkbox: 'Sim/Não',
+      url: 'Link',
+    };
+    const table = (entity, title) => {
+      const list = fields.filter((f) => f.entity === entity);
+      return `<div class="card"><div class="flex between"><h3>${title}</h3>${ro ? '' : `<button class="btn sm" data-new="${entity}">+ Novo campo</button>`}</div>
+        ${
+          list.length
+            ? `<div class="table-wrap"><table><thead><tr><th>Campo</th><th>Tipo</th><th>Obrigatório</th>${ro ? '' : '<th></th>'}</tr></thead><tbody>${list
+                .map(
+                  (f) =>
+                    `<tr><td>${UI.esc(f.label)} <span class="muted small mono">${UI.esc(f.key)}</span></td><td>${typeLabels[f.type]}${f.type === 'select' ? `<div class="muted small">${UI.esc(f.options.join(', '))}</div>` : ''}</td><td>${f.required ? 'Sim' : 'Não'}</td>${ro ? '' : `<td class="nowrap"><button class="btn ghost sm" data-edit="${f.id}">Editar</button><button class="btn ghost sm" data-del="${f.id}">Excluir</button></td>`}</tr>`,
+                )
+                .join('')}</tbody></table></div>`
+            : UI.empty('Nenhum campo personalizado', 'Crie campos para guardar informações específicas do seu negócio.')
+        }</div>`;
+    };
+    box.innerHTML = `<p class="muted small">Campos extras aparecem nos formulários e na ficha do cliente e da oportunidade. Excluir um campo só o remove dos formulários: os valores já preenchidos continuam guardados.</p>
+      <div class="grid cols-2">${table('customer', 'Clientes')}${table('opportunity', 'Oportunidades')}</div>`;
+    if (ro) return;
+    const done = async () => {
+      await CRM.loadCustomFields(true);
+      this.campos(box);
+    };
+    box.onclick = async (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.new) this.fieldForm({ entity: b.dataset.new }, typeLabels, done);
+      if (b.dataset.edit)
+        this.fieldForm(
+          fields.find((f) => f.id === Number(b.dataset.edit)),
+          typeLabels,
+          done,
+        );
+      if (b.dataset.del) {
+        const f = fields.find((x) => x.id === Number(b.dataset.del));
+        if (!(await UI.confirm(`Remover o campo "${f.label}" dos formulários?`, { danger: true, okLabel: 'Remover' })))
+          return;
+        try {
+          UI.ok((await api(`/custom-fields/${f.id}`, { method: 'DELETE' })).message);
+          done();
+        } catch (err) {
+          UI.err(err);
+        }
+      }
+    };
+  },
+
+  fieldForm(f, typeLabels, done) {
+    const isEdit = Boolean(f.id);
+    const m = UI.modal({
+      title: isEdit ? 'Editar campo' : `Novo campo de ${f.entity === 'customer' ? 'cliente' : 'oportunidade'}`,
+      size: 'narrow',
+      body: `<form id="cfForm">${UI.field('label', 'Nome do campo', UI.input('label', f.label, 'required maxlength="60" placeholder="ex.: Data de aniversário"'), { required: true })}
+        ${UI.field('type', 'Tipo', UI.select('type', Object.entries(typeLabels), f.type || 'text', isEdit ? 'disabled' : ''))}
+        <div id="optBox">${UI.field('options', 'Opções (uma por linha)', UI.textarea('options', (f.options || []).join('\n'), 'rows="4"'))}</div>
+        <label class="check"><input type="checkbox" name="required" ${f.required ? 'checked' : ''}> Preenchimento obrigatório</label></form>`,
+      footer: `<button class="btn secondary" data-close>Cancelar</button><button class="btn" type="submit" form="cfForm">Salvar</button>`,
+    });
+    const form = m.el.querySelector('#cfForm');
+    const sync = () => (m.el.querySelector('#optBox').hidden = form.type.value !== 'select');
+    form.type.onchange = sync;
+    sync();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = {
+        label: form.label.value.trim(),
+        required: form.required.checked,
+        options: form.options.value
+          .split('\n')
+          .map((x) => x.trim())
+          .filter(Boolean),
+      };
+      if (!isEdit) Object.assign(body, { entity: f.entity, type: form.type.value });
       try {
-        const r = await api('/settings/stages', { method: 'PUT', body: { stages: list } });
+        const r = isEdit
+          ? await api(`/custom-fields/${f.id}`, { method: 'PUT', body })
+          : await api('/custom-fields', { method: 'POST', body });
         UI.ok(r.message);
-        this.data.stages = r.stages;
-        this.funil(box);
+        m.close();
+        done();
       } catch (err) {
-        UI.err(err);
+        UI.showErrors(form, err);
+      }
+    };
+  },
+
+  // ---------- Automações ----------
+  async automacoes(box) {
+    const [{ automations }, { pipelines }] = await Promise.all([api('/automations'), api('/pipelines')]);
+    const ro = !CRM.isAdmin();
+    const statusBadge = (st) =>
+      ({
+        ok: '<span class="badge success">ok</span>',
+        partial: '<span class="badge warning">parcial</span>',
+        error: '<span class="badge danger">erro</span>',
+      })[st] || '';
+    box.innerHTML = `<div class="card"><div class="flex between wrap"><div><h3>Automações do funil</h3><p class="muted small">Quando uma oportunidade entra em uma etapa, as ações configuradas rodam sozinhas: criar tarefa, mandar WhatsApp, definir responsável (inclusive por rodízio), marcar o cliente ou avisar alguém.</p></div>
+      ${ro ? '' : '<button class="btn sm" id="newAut">+ Nova automação</button>'}</div>
+      ${
+        automations.length
+          ? `<div class="table-wrap"><table><thead><tr><th>Nome</th><th>Quando entrar em</th><th>Ações</th><th>Última execução</th><th>Situação</th><th></th></tr></thead><tbody>${automations
+              .map(
+                (a) =>
+                  `<tr><td><b>${UI.esc(a.name)}</b></td><td>${pipelines.length > 1 ? `<span class="muted small">${UI.esc(a.pipeline_name)} ›</span> ` : ''}${UI.esc(a.stage_name)}</td>
+                  <td class="small">${a.actions.map((x) => UI.esc(this.actionLabels[x.type])).join(', ')}</td>
+                  <td class="small">${a.last_run ? `${statusBadge(a.last_run.status)} ${UI.fmtDateTime(a.last_run.created_at)}` : '<span class="muted">nunca</span>'}</td>
+                  <td>${a.active ? '<span class="badge success">ativa</span>' : '<span class="badge">pausada</span>'}</td>
+                  <td class="nowrap"><button class="btn ghost sm" data-runs="${a.id}">Histórico</button>${ro ? '' : `<button class="btn ghost sm" data-edit="${a.id}">Editar</button><button class="btn ghost sm" data-del="${a.id}">Excluir</button>`}</td></tr>`,
+              )
+              .join('')}</tbody></table></div>`
+          : UI.empty(
+              'Nenhuma automação',
+              ro
+                ? 'Peça a um administrador para criar.'
+                : 'Crie a primeira: ex.: ao entrar em "Proposta", criar tarefa de follow-up em 2 dias.',
+            )
+      }</div>`;
+    const reload = () => this.automacoes(box);
+    const nb = box.querySelector('#newAut');
+    if (nb) nb.onclick = () => this.automationForm(null, pipelines, reload);
+    box.onclick = async (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const a = automations.find((x) => x.id === Number(b.dataset.runs || b.dataset.edit || b.dataset.del));
+      if (!a) return;
+      if (b.dataset.runs) this.automationRuns(a, statusBadge);
+      if (b.dataset.edit) this.automationForm(a, pipelines, reload);
+      if (b.dataset.del) {
+        if (!(await UI.confirm(`Excluir a automação "${a.name}"?`, { danger: true, okLabel: 'Excluir' }))) return;
+        try {
+          UI.ok((await api(`/automations/${a.id}`, { method: 'DELETE' })).message);
+          reload();
+        } catch (err) {
+          UI.err(err);
+        }
+      }
+    };
+  },
+
+  actionLabels: {
+    create_task: 'Criar tarefa',
+    send_whatsapp: 'Enviar WhatsApp',
+    set_owner: 'Definir responsável',
+    add_tag: 'Adicionar etiqueta ao cliente',
+    notify: 'Avisar usuário',
+  },
+
+  // Campos de cada tipo de ação (data-k = propriedade enviada à API)
+  actionFields(a) {
+    const users = (CRM.users || []).filter((u) => u.active);
+    const who = (k, v, extra = []) =>
+      UI.select(
+        k,
+        [
+          ['owner', 'Responsável pela oportunidade'],
+          ['actor', 'Quem moveu o cartão'],
+          ...extra,
+          ...users.map((u) => [u.id, u.name]),
+        ],
+        v,
+        `data-k="${k}" data-int-or-str`,
+      );
+    switch (a.type) {
+      case 'create_task':
+        return `<div class="form-row cols-3">${UI.field('title', 'Título da tarefa', UI.input('title', a.title, 'data-k="title" placeholder="ex.: Ligar para {primeiro_nome}"'))}
+          ${UI.field('due_in_hours', 'Prazo (horas)', `<input type="number" min="0" max="8760" data-k="due_in_hours" value="${UI.attr(a.due_in_hours ?? 24)}">`)}
+          ${UI.field('assignee', 'Para', who('assignee', a.assignee ?? 'owner', [['none', 'Ninguém']]))}</div>`;
+      case 'send_whatsapp':
+        return UI.field(
+          'text',
+          'Mensagem',
+          `<textarea data-k="text" rows="3" placeholder="Olá {primeiro_nome}, ...">${UI.esc(a.text || '')}</textarea>`,
+        );
+      case 'set_owner':
+        return UI.field(
+          'user_id',
+          'Novo responsável',
+          UI.select(
+            'user_id',
+            [['round_robin', 'Rodízio entre atendentes disponíveis'], ...users.map((u) => [u.id, u.name])],
+            a.user_id ?? 'round_robin',
+            'data-k="user_id" data-int-or-str',
+          ),
+        );
+      case 'add_tag':
+        return UI.field('tag', 'Etiqueta', UI.input('tag', a.tag, 'data-k="tag" placeholder="ex.: proposta-enviada"'));
+      case 'notify':
+        return `<div class="form-row">${UI.field('user', 'Avisar', who('user', a.user ?? 'owner'))}${UI.field('text', 'Aviso', UI.input('text', a.text, 'data-k="text" placeholder="ex.: {oportunidade} chegou em {etapa}"'))}</div>`;
+      default:
+        return '';
+    }
+  },
+
+  automationForm(a, pipelines, done) {
+    const isEdit = Boolean(a);
+    const actions = a ? a.actions.map((x) => ({ ...x })) : [{ type: 'create_task' }];
+    const stageOptions = pipelines
+      .map(
+        (p) =>
+          `<optgroup label="${UI.attr(p.name)}">${p.stages
+            .filter((s) => s.active)
+            .map(
+              (s) => `<option value="${s.id}" ${a && a.stage_id === s.id ? 'selected' : ''}>${UI.esc(s.name)}</option>`,
+            )
+            .join('')}</optgroup>`,
+      )
+      .join('');
+    const m = UI.modal({
+      title: isEdit ? 'Editar automação' : 'Nova automação',
+      size: 'wide',
+      body: `<form id="autForm"><div class="form-row">${UI.field('name', 'Nome', UI.input('name', a?.name, 'required placeholder="ex.: Follow-up de proposta"'), { required: true })}
+        ${UI.field('stage_id', 'Quando a oportunidade entrar na etapa', `<select name="stage_id" data-type="int" required>${stageOptions}</select>`, { required: true })}</div>
+        <label class="check"><input type="checkbox" name="active" ${!a || a.active ? 'checked' : ''}> Automação ativa</label>
+        <h4 class="mt">Ações (executadas em ordem)</h4><div id="actList"></div>
+        <button type="button" class="btn secondary sm" id="addAct">+ Adicionar ação</button>
+        <p class="muted small mt">Variáveis nos textos: {nome}, {primeiro_nome}, {oportunidade}, {valor}, {etapa}, {responsavel}, {empresa}. "Enviar WhatsApp" usa a conversa do cliente em um número conectado (no WhatsApp oficial, fora da janela de 24h, a Meta exige modelo aprovado).</p></form>`,
+      footer: `<button class="btn secondary" data-close>Cancelar</button><button class="btn" type="submit" form="autForm">Salvar</button>`,
+    });
+    const form = m.el.querySelector('#autForm');
+    const list = m.el.querySelector('#actList');
+    // Lê os valores digitados antes de redesenhar a lista
+    const read = () =>
+      [...list.querySelectorAll('.action-row')].map((row) => {
+        const out = { type: row.querySelector('[data-type-sel]').value };
+        row.querySelectorAll('[data-k]').forEach((el) => {
+          let v = el.value.trim();
+          if (el.type === 'number') v = v === '' ? undefined : Number(v);
+          else if (el.hasAttribute('data-int-or-str') && /^\d+$/.test(v)) v = Number(v);
+          out[el.dataset.k] = v;
+        });
+        return out;
+      });
+    const draw = () => {
+      list.innerHTML = actions
+        .map(
+          (x, i) =>
+            `<div class="action-row card" data-i="${i}"><div class="flex between"><select data-type-sel style="width:auto">${Object.entries(
+              this.actionLabels,
+            )
+              .map(([k, l]) => `<option value="${k}" ${k === x.type ? 'selected' : ''}>${l}</option>`)
+              .join(
+                '',
+              )}</select>${actions.length > 1 ? '<button type="button" class="icon-btn" data-rm title="Remover ação">🗑</button>' : ''}</div>${this.actionFields(x)}</div>`,
+        )
+        .join('');
+    };
+    draw();
+    list.onchange = (e) => {
+      if (!e.target.matches('[data-type-sel]')) return;
+      const i = Number(e.target.closest('.action-row').dataset.i);
+      actions.splice(0, actions.length, ...read());
+      actions[i] = { type: e.target.value };
+      draw();
+    };
+    list.onclick = (e) => {
+      if (!e.target.closest('[data-rm]')) return;
+      const i = Number(e.target.closest('.action-row').dataset.i);
+      actions.splice(0, actions.length, ...read());
+      actions.splice(i, 1);
+      draw();
+    };
+    m.el.querySelector('#addAct').onclick = () => {
+      actions.splice(0, actions.length, ...read());
+      if (actions.length >= 10) return UI.err(new Error('Máximo de 10 ações por automação.'));
+      actions.push({ type: 'notify' });
+      draw();
+    };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = {
+        name: form.name.value.trim(),
+        stage_id: Number(form.stage_id.value),
+        active: form.active.checked,
+        actions: read(),
+      };
+      try {
+        const r = isEdit
+          ? await api(`/automations/${a.id}`, { method: 'PUT', body })
+          : await api('/automations', { method: 'POST', body });
+        UI.ok(r.message);
+        m.close();
+        done();
+      } catch (err) {
+        UI.showErrors(form, err);
+        if (!err.data?.fields) UI.err(err);
+      }
+    };
+  },
+
+  async automationRuns(a, statusBadge) {
+    const { runs } = await api(`/automations/${a.id}/runs`);
+    UI.modal({
+      title: `Histórico — ${a.name}`,
+      size: 'wide',
+      body: runs.length
+        ? `<div class="table-wrap"><table><thead><tr><th>Quando</th><th>Oportunidade</th><th>Resultado</th><th>Detalhes</th></tr></thead><tbody>${runs
+            .map(
+              (r) =>
+                `<tr><td class="nowrap small">${UI.fmtDateTime(r.created_at)}</td><td>${r.opportunity_id ? `<a href="#/funil/${r.opportunity_id}">${UI.esc(r.opportunity_title || '#' + r.opportunity_id)}</a>` : '—'}</td><td>${statusBadge(r.status)}</td>
+                <td class="small">${r.detail.map((d) => `<div>${d.ok ? '✓' : '✗'} ${UI.esc(this.actionLabels[d.type] || d.type)}${d.error ? ` — <span class="text-danger">${UI.esc(d.error)}</span>` : ''}</div>`).join('')}</td></tr>`,
+            )
+            .join('')}</tbody></table></div>`
+        : UI.empty('Nenhuma execução ainda', 'Mova uma oportunidade para a etapa para disparar a automação.'),
+      footer: '<button class="btn secondary" data-close>Fechar</button>',
+    });
+  },
+
+  // ---------- Robô de atendimento ----------
+  async robo(box) {
+    const [bot, { channels }, { pipelines }] = await Promise.all([
+      api('/chatbot'),
+      api('/channels'),
+      api('/pipelines'),
+    ]);
+    const ro = !CRM.isAdmin();
+    const cfg = bot.config;
+    const options = cfg.options.map((o) => ({ ...o }));
+    const users = (CRM.users || []).filter((u) => u.active);
+    const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    const dis = ro ? 'disabled' : '';
+    const stageOptions = (sel) =>
+      `<option value="">— Não mudar —</option>${pipelines
+        .map(
+          (p) =>
+            `<optgroup label="${UI.attr(p.name)}">${p.stages
+              .filter((s) => s.active && s.kind === 'open')
+              .map((s) => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${UI.esc(s.name)}</option>`)
+              .join('')}</optgroup>`,
+        )
+        .join('')}`;
+    const optionRow = (o, i) => `<div class="action-row card" data-i="${i}">
+      <div class="flex between"><strong>Opção ${i + 1}</strong>${ro ? '' : '<button type="button" class="icon-btn" data-rm title="Remover opção">🗑</button>'}</div>
+      <div class="form-row">${UI.field('', 'Texto da opção', `<input data-k="label" maxlength="60" value="${UI.attr(o.label || '')}" placeholder="ex.: Fazer um pedido" ${dis}>`)}
+        ${UI.field('', 'Resposta do robô', `<input data-k="reply" maxlength="1000" value="${UI.attr(o.reply || '')}" placeholder="ex.: Ótimo! Um vendedor já vai te atender." ${dis}>`)}</div>
+      <div class="form-row cols-3">${UI.field('', 'Encaminhar para', UI.select('assign', [['', '— Fila (qualquer atendente) —'], ['round_robin', 'Rodízio entre atendentes disponíveis'], ...users.map((u) => [u.id, u.name])], o.assign ?? '', `data-k="assign" ${dis}`))}
+        ${UI.field('', 'Mover oportunidade para', `<select data-k="stage_id" ${dis}>${stageOptions(o.stage_id)}</select>`)}
+        ${UI.field('', 'Etiqueta no cliente', `<input data-k="tag" maxlength="40" value="${UI.attr(o.tag || '')}" placeholder="opcional" ${dis}>`)}</div></div>`;
+    const day = (d) => {
+      const span = cfg.hours.days?.[String(d)];
+      return `<tr data-day="${d}"><td><label class="check"><input type="checkbox" data-open ${span ? 'checked' : ''} ${dis}> ${DAYS[d]}</label></td>
+        <td><input type="time" data-start value="${UI.attr(span ? span[0] : '08:00')}" ${dis}></td><td><input type="time" data-end value="${UI.attr(span ? span[1] : '18:00')}" ${dis}></td></tr>`;
+    };
+    box.innerHTML = `<form id="botForm"><div class="card"><div class="flex between wrap"><div><h3>Robô de atendimento</h3>
+        <p class="muted small">Responde na hora quem chama pela primeira vez (ou volta depois de a conversa ser encerrada): dá boas-vindas, mostra um menu e encaminha a conversa. Assim que alguém da equipe responde ou assume a conversa, o robô para.</p></div>
+        <label class="check"><input type="checkbox" name="enabled" ${bot.enabled ? 'checked' : ''} ${dis}> <strong>Robô ativo</strong></label></div>
+      ${UI.field('welcome', 'Mensagem de boas-vindas', `<textarea name="welcome" rows="3" maxlength="1000" ${dis}>${UI.esc(cfg.welcome)}</textarea>`, { hint: 'Variáveis: {nome}, {primeiro_nome}, {empresa}. O menu é adicionado logo abaixo.' })}
+      <h4 class="mt">Menu de opções</h4><p class="muted small">O cliente responde com o número (ou o texto) da opção. Sem opções, o robô só envia as boas-vindas.</p>
+      <div id="optList"></div>${ro ? '' : '<button type="button" class="btn secondary sm" id="addOpt">+ Adicionar opção</button>'}
+      <div class="form-row mt">${UI.field('invalid', 'Quando a resposta não é uma opção', `<textarea name="invalid" rows="2" maxlength="500" ${dis}>${UI.esc(cfg.invalid)}</textarea>`, { hint: 'O menu é repetido abaixo. Na 3ª tentativa, o robô passa para a equipe.' })}
+        ${UI.field('handoff', 'Ao passar para a equipe', `<textarea name="handoff" rows="2" maxlength="500" ${dis}>${UI.esc(cfg.handoff)}</textarea>`)}</div></div>
+      <div class="grid cols-2"><div class="card"><h3>Horário de atendimento</h3>
+        <label class="check"><input type="checkbox" name="hours_enabled" ${cfg.hours.enabled ? 'checked' : ''} ${dis}> Avisar quando a mensagem chegar fora do horário</label>
+        <table class="mt"><tbody>${[1, 2, 3, 4, 5, 6, 0].map(day).join('')}</tbody></table>
+        ${UI.field('away', 'Mensagem fora do horário', `<textarea name="away" rows="2" maxlength="1000" ${dis}>${UI.esc(cfg.hours.away)}</textarea>`, { hint: 'Enviada no máximo uma vez a cada 12 horas por conversa. Fora do horário o menu não é mostrado.' })}</div>
+      <div class="card"><h3>Canais</h3><p class="muted small">Escolha onde o robô atende. Nenhum marcado = todos.</p>
+        ${channels.length ? channels.map((c) => `<label class="check"><input type="checkbox" data-channel="${c.id}" ${cfg.channels.includes(c.id) ? 'checked' : ''} ${dis}> ${UI.esc(c.name)} <span class="muted small">(${UI.esc({ whatsapp: 'WhatsApp', whatsapp_web: 'WhatsApp', instagram: 'Instagram', messenger: 'Messenger' }[c.type])})</span></label>`).join('') : '<p class="muted small">Nenhum canal conectado ainda.</p>'}
+        <h3 class="mt">Como o cliente vê</h3><div class="bot-preview" id="botPreview"></div></div></div>
+      ${ro ? '' : '<div class="flex end"><button class="btn">Salvar robô</button></div>'}</form>`;
+    const form = box.querySelector('#botForm');
+    const list = box.querySelector('#optList');
+    const read = () =>
+      [...list.querySelectorAll('.action-row')].map((row) => {
+        const v = (k) => row.querySelector(`[data-k=${k}]`).value.trim();
+        const assign = v('assign');
+        return {
+          label: v('label'),
+          reply: v('reply'),
+          assign: assign === '' ? null : assign === 'round_robin' ? assign : Number(assign),
+          stage_id: v('stage_id') ? Number(v('stage_id')) : null,
+          tag: v('tag') || null,
+        };
+      });
+    const preview = () => {
+      const opts = read().filter((o) => o.label);
+      const welcome = form.welcome.value
+        .replace(/\{primeiro_nome\}/g, 'Maria')
+        .replace(/\{nome\}/g, 'Maria Silva')
+        .replace(/\{empresa\}/g, this.data.settings.name || '');
+      box.querySelector('#botPreview').textContent = opts.length
+        ? `${welcome}\n\n${opts.map((o, i) => `${i + 1} - ${o.label}`).join('\n')}`
+        : welcome;
+    };
+    const draw = () => {
+      list.innerHTML = options.map(optionRow).join('') || '<p class="muted small">Nenhuma opção.</p>';
+      preview();
+    };
+    draw();
+    form.oninput = preview;
+    if (ro) return;
+    list.onclick = (e) => {
+      if (!e.target.closest('[data-rm]')) return;
+      const i = Number(e.target.closest('.action-row').dataset.i);
+      options.splice(0, options.length, ...read());
+      options.splice(i, 1);
+      draw();
+    };
+    box.querySelector('#addOpt').onclick = () => {
+      options.splice(0, options.length, ...read());
+      if (options.length >= 9) return UI.err(new Error('No máximo 9 opções no menu.'));
+      options.push({ label: '', reply: '', assign: null, stage_id: null, tag: null });
+      draw();
+    };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const days = {};
+      box.querySelectorAll('tr[data-day]').forEach((tr) => {
+        if (tr.querySelector('[data-open]').checked)
+          days[tr.dataset.day] = [tr.querySelector('[data-start]').value, tr.querySelector('[data-end]').value];
+      });
+      const body = {
+        enabled: form.enabled.checked,
+        config: {
+          channels: [...box.querySelectorAll('[data-channel]:checked')].map((x) => Number(x.dataset.channel)),
+          welcome: form.welcome.value.trim(),
+          invalid: form.invalid.value.trim(),
+          handoff: form.handoff.value.trim(),
+          options: read().filter((o) => o.label),
+          hours: { enabled: form.hours_enabled.checked, days, away: form.away.value.trim() },
+        },
+      };
+      try {
+        UI.ok((await api('/chatbot', { method: 'PUT', body })).message);
+      } catch (err) {
+        UI.showErrors(form, err);
+        if (!err.data?.fields) UI.err(err);
       }
     };
   },
@@ -270,18 +767,290 @@ CRM.pages.settings = {
     sr.onsubmit = save(sr, 'contact_sources');
   },
 
-  async integracoes(box) {
-    const wa = await api('/whatsapp/status');
+  integracoes(box) {
     const smtp = this.data.integrations.smtp;
-    box.innerHTML = `<div class="grid cols-2"><div class="card"><div class="card-title"><h3>WhatsApp Business (API oficial)</h3>${wa.connected ? '<span class="badge success">Conectado</span>' : '<span class="badge">Desconectado</span>'}</div>
-      <p class="small">${UI.esc(wa.message)}</p>
-      ${wa.connected ? `<p class="small">Número (ID): <span class="mono">${UI.esc(wa.phone_number_id)}</span></p>` : ''}
-      <p class="small">URL do webhook para configurar no painel da Meta: <span class="mono">${UI.esc(wa.webhook_url)}</span></p>
-      <div class="help">Variáveis no servidor (.env): <span class="mono">WHATSAPP_TOKEN</span>, <span class="mono">WHATSAPP_PHONE_NUMBER_ID</span>, <span class="mono">WHATSAPP_VERIFY_TOKEN</span> e <span class="mono">WHATSAPP_APP_SECRET</span>. As credenciais nunca são armazenadas no banco nem exibidas aqui.</div>
-      <p class="small muted">O botão "Abrir WhatsApp" nas telas de cliente e atendimento funciona sempre, mas apenas abre a conversa no aplicativo — as mensagens não são sincronizadas. Nenhum envio é simulado.</p></div>
-      <div class="card"><div class="card-title"><h3>E-mail (SMTP)</h3>${smtp.configured ? '<span class="badge success">Configurado</span>' : '<span class="badge">Não configurado</span>'}</div>
+    box.innerHTML = `<div class="grid cols-2"><div class="card"><div class="card-title"><h3>E-mail (SMTP)</h3>${smtp.configured ? '<span class="badge success">Configurado</span>' : '<span class="badge">Não configurado</span>'}</div>
       <p class="small">${smtp.configured ? 'A recuperação de senha envia o link por e-mail.' : 'Sem SMTP, a recuperação de senha registra o link no log do servidor e o administrador pode gerar um link em Configurações › Usuários › Senha.'}</p>
-      <div class="help">Variáveis: <span class="mono">SMTP_HOST</span>, <span class="mono">SMTP_PORT</span>, <span class="mono">SMTP_USER</span>, <span class="mono">SMTP_PASS</span>, <span class="mono">MAIL_FROM</span>.</div></div></div>`;
+      <div class="help">Configurado no servidor pelo responsável pela plataforma.</div></div>
+      <div class="card"><div class="card-title"><h3>WhatsApp Business</h3></div><p class="small">Conecte o número da empresa em <a href="#/configuracoes/whatsapp">Configurações › WhatsApp</a>.</p></div></div>`;
+  },
+
+  async whatsapp(box) {
+    const { channels } = await api('/channels');
+    const statusBadge = (c) =>
+      ({
+        connected: '<span class="badge success">Conectado</span>',
+        pending: '<span class="badge warning">Aguardando leitura do QR</span>',
+        error: '<span class="badge danger">Erro</span>',
+      })[c.status] || '<span class="badge">Desconectado</span>';
+    const kind = (c) =>
+      ({
+        whatsapp_web: 'WhatsApp · QR Code (WhatsApp Web)',
+        whatsapp: 'WhatsApp · API oficial (Meta)',
+        instagram: 'Instagram Direct',
+        messenger: 'Facebook Messenger',
+      })[c.type];
+    const social = (c) => c.type === 'instagram' || c.type === 'messenger';
+    const socialDetails = (c) => `<h4>Webhook (configure no painel da Meta)</h4>
+      ${UI.field('', 'URL de retorno (Callback URL)', `<input readonly value="${UI.attr(c.webhook_url)}" data-select-all>`)}
+      ${UI.field('', 'Token de verificação (Verify token)', `<input readonly value="${UI.attr(c.verify_token)}" data-select-all>`)}
+      <p class="small muted">No app da Meta, em ${c.type === 'instagram' ? 'Instagram › Webhooks (objeto <em>Instagram</em>)' : 'Messenger › Configurações › Webhooks (objeto <em>Page</em>)'}, cole os dois valores acima e assine <span class="mono">messages</span>, <span class="mono">message_echoes</span>, <span class="mono">message_deliveries</span>, <span class="mono">message_reads</span> e <span class="mono">messaging_postbacks</span>.
+      ${c.has_app_secret ? '' : '<br><strong>Recomendado:</strong> informe a chave secreta do app para o CRM conferir a assinatura de cada mensagem recebida.'}</p>
+      <p class="small muted">ID da página: <span class="mono">${UI.esc(c.page_id)}</span>${c.ig_account_id ? ` · ID do Instagram: <span class="mono">${UI.esc(c.ig_account_id)}</span>` : ''}</p>`;
+    const apiDetails = (c) => `<h4>Webhook (configure no painel da Meta)</h4>
+      ${UI.field('', 'URL de retorno (Callback URL)', `<input readonly value="${UI.attr(c.webhook_url)}" data-select-all>`)}
+      ${UI.field('', 'Token de verificação (Verify token)', `<input readonly value="${UI.attr(c.verify_token)}" data-select-all>`)}
+      <p class="small muted">Em WhatsApp › Configuração › Webhook, cole os dois valores acima e assine o campo <span class="mono">messages</span>.
+      ${c.has_app_secret ? '' : '<br><strong>Recomendado:</strong> informe a chave secreta do app para o CRM conferir a assinatura de cada mensagem recebida.'}</p>
+      <p class="small muted">ID do número: <span class="mono">${UI.esc(c.phone_number_id)}</span>${c.waba_id ? ` · ID da conta (WABA): <span class="mono">${UI.esc(c.waba_id)}</span>` : ''}</p>`;
+    const actions = (c) => {
+      if (c.type === 'whatsapp_web')
+        return c.status === 'connected'
+          ? `<button class="btn ghost sm" data-disconnect="${c.id}">Desconectar</button>`
+          : `<button class="btn sm" data-qr="${c.id}">Gerar QR Code</button>`;
+      return `<button class="btn secondary sm" data-edit="${c.id}">${c.status === 'connected' ? 'Atualizar credenciais' : 'Reconectar'}</button>
+        ${c.status === 'connected' ? `<button class="btn ghost sm" data-disconnect="${c.id}">Desconectar</button>` : ''}`;
+    };
+    const channelCard = (
+      c,
+    ) => `<div class="card channel-card"><div class="card-title"><div><h3>${UI.esc(c.name)}</h3><div class="muted small">${kind(c)}</div></div>${statusBadge(c)}</div>
+      ${c.display_phone ? `<p><strong>${UI.esc(social(c) ? c.display_phone : UI.fmtPhone(c.display_phone))}</strong> ${c.verified_name ? `<span class="muted">· ${UI.esc(c.verified_name)}</span>` : ''}</p>` : ''}
+      ${c.last_error ? `<div class="alert warning small">${UI.esc(c.last_error)}</div>` : ''}
+      ${c.type === 'whatsapp' && CRM.isAdmin() ? apiDetails(c) : ''}
+      ${social(c) && CRM.isAdmin() ? socialDetails(c) : ''}
+      <div class="flex">${actions(c)}</div></div>`;
+    const credentialFields = (isNew, isSocial = false) =>
+      isSocial
+        ? `${UI.field('access_token', 'Token de acesso da página', UI.input('access_token', '', 'type="password" autocomplete="off"'), { hint: 'Um novo token reconecta o canal.' })}
+      ${UI.field('app_secret', 'Chave secreta do app (App Secret)', UI.input('app_secret', '', 'type="password" autocomplete="off"'))}`
+        : `
+      ${isNew ? UI.field('name', 'Nome da conexão', UI.input('name', 'WhatsApp', 'required maxlength="80"'), { required: true, hint: 'Ex.: Vendas, Suporte.' }) : ''}
+      ${UI.field('access_token', 'Token de acesso permanente', UI.input('access_token', '', `type="password" ${isNew ? 'required' : ''} autocomplete="off"`), { required: isNew, hint: 'Gerado em Configurações do negócio › Usuários do sistema, com as permissões whatsapp_business_messaging e whatsapp_business_management.' })}
+      ${isNew ? UI.field('phone_number_id', 'ID do número de telefone (Phone number ID)', UI.input('phone_number_id', '', 'required inputmode="numeric"'), { required: true }) : ''}
+      ${UI.field('waba_id', 'ID da conta do WhatsApp Business (WABA ID)', UI.input('waba_id', '', 'inputmode="numeric"'), { hint: 'Necessário para listar os modelos de mensagem aprovados.' })}
+      ${UI.field('app_secret', 'Chave secreta do app (App Secret)', UI.input('app_secret', '', 'type="password" autocomplete="off"'), { hint: 'Em Configurações do app › Básico. Protege o webhook contra mensagens falsas.' })}`;
+    box.innerHTML = `${channels.length ? `<div class="grid cols-2">${channels.map(channelCard).join('')}</div>` : ''}
+      <h3 class="mt">${channels.length ? 'Adicionar outra conexão' : 'Conectar o WhatsApp da empresa'}</h3>
+      <div class="grid cols-2">
+        <div class="card option-card"><div class="option-icon">▣</div><h3>Pelo QR Code</h3>
+          <p class="small">Conecte em 1 minuto, usando o WhatsApp que já está no celular da empresa, como no WhatsApp Web. Fotos e áudios continuam no celular: o CRM só os mostra quando você abre.</p>
+          <div class="alert warning small"><strong>Atenção:</strong> esta conexão não é oficial. O WhatsApp pode bloquear o número, principalmente se ele enviar muitas mensagens para quem não tem o número salvo. Para grandes volumes, prefira a API oficial.</div>
+          <button class="btn" id="newQr">Gerar QR Code</button></div>
+        <div class="card option-card"><div class="option-icon">✓</div><h3>Pela API oficial da Meta <span class="badge success">Recomendado</span></h3>
+          <p class="small">Sem risco de bloqueio, com modelos de mensagem aprovados e várias pessoas atendendo. Exige conta no Meta Business.</p>
+          <details class="help"><summary>Passo a passo na Meta</summary><ol class="small">
+            <li>Em <span class="mono">developers.facebook.com</span>, crie um app do tipo <em>Empresa</em> e adicione o produto <em>WhatsApp</em>.</li>
+            <li>Em WhatsApp › Configuração da API, adicione e verifique o número da empresa. Copie o <em>ID do número de telefone</em> e o <em>ID da conta do WhatsApp Business</em>.</li>
+            <li>Em business.facebook.com › Configurações do negócio › Usuários do sistema, crie um usuário administrador, atribua o app e a conta do WhatsApp e gere um <em>token permanente</em>.</li>
+            <li>Em Configurações do app › Básico, copie a <em>Chave secreta do app</em>.</li>
+            <li>Preencha o formulário abaixo. Depois, configure o webhook na Meta com os dados que vão aparecer aqui.</li></ol></details>
+          <form id="waForm" class="mt">${credentialFields(true)}<button class="btn">Conectar pela API</button></form></div>
+      </div>
+      <div class="card mt"><div class="card-title"><div><h3>Instagram Direct e Facebook Messenger</h3>
+        <p class="small muted">As mensagens do Direct e da página chegam na mesma tela de Conversas, com robô, funil e automações. Fotos e áudios ficam na Meta: o CRM só os mostra quando você abre.</p></div></div>
+        <div class="grid cols-2"><form id="socialForm">
+          ${UI.field(
+            'type',
+            'Rede',
+            UI.select(
+              'type',
+              [
+                ['instagram', 'Instagram Direct'],
+                ['messenger', 'Facebook Messenger'],
+              ],
+              'instagram',
+            ),
+          )}
+          ${UI.field('name', 'Nome da conexão', UI.input('name', 'Instagram', 'required maxlength="80"'), { required: true })}
+          ${UI.field('page_id', 'ID da página do Facebook (Page ID)', UI.input('page_id', '', 'required inputmode="numeric"'), { required: true, hint: 'O Instagram precisa ser uma conta profissional vinculada a esta página.' })}
+          ${UI.field('access_token', 'Token de acesso da página', UI.input('access_token', '', 'type="password" required autocomplete="off"'), { required: true })}
+          ${UI.field('app_secret', 'Chave secreta do app (App Secret)', UI.input('app_secret', '', 'type="password" autocomplete="off"'), { hint: 'Recomendado: protege o webhook contra mensagens falsas.' })}
+          <button class="btn">Conectar</button></form>
+        <details class="help" open><summary>Passo a passo na Meta</summary><ol class="small">
+          <li>No app da Meta (o mesmo do WhatsApp serve), adicione os produtos <em>Messenger</em> e/ou <em>Instagram</em>.</li>
+          <li>Instagram: a conta precisa ser <em>profissional</em> e estar vinculada à página do Facebook da empresa. Ative <em>Permitir acesso às mensagens</em> no app do Instagram (Configurações › Mensagens).</li>
+          <li>Gere um <em>token de acesso da página</em> com as permissões <span class="mono">pages_messaging</span>, <span class="mono">pages_manage_metadata</span> e, para o Instagram, <span class="mono">instagram_basic</span> e <span class="mono">instagram_manage_messages</span>. Use um token de usuário do sistema para ele não expirar.</li>
+          <li>Copie o <em>ID da página</em> (em Sobre › Transparência da página, ou no Meta Business).</li>
+          <li>Conecte aqui e depois configure o webhook com a URL e o token que vão aparecer no cartão da conexão.</li></ol></details></div></div>`;
+    const form = box.querySelector('#waForm');
+    const clean = (d) => Object.fromEntries(Object.entries(d).filter(([, v]) => v !== '' && v != null));
+    const sf = box.querySelector('#socialForm');
+    sf.type.onchange = () => {
+      if (['Instagram', 'Messenger'].includes(sf.name.value))
+        sf.name.value = sf.type.value === 'instagram' ? 'Instagram' : 'Messenger';
+    };
+    sf.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = sf.querySelector('button');
+      btn.disabled = true;
+      try {
+        const r = await api('/channels/social', { method: 'POST', body: clean(UI.formData(sf)) });
+        UI.ok(r.message);
+        this.whatsapp(box);
+      } catch (err) {
+        UI.showErrors(sf, err);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button');
+      btn.disabled = true;
+      try {
+        const r = await api('/channels', { method: 'POST', body: clean(UI.formData(form)) });
+        UI.ok(r.message);
+        this.whatsapp(box);
+      } catch (err) {
+        UI.showErrors(form, err);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+    box.querySelector('#newQr').onclick = async () => {
+      const name = await UI.prompt('Nome da conexão', {
+        title: 'Conectar pelo QR Code',
+        placeholder: 'Ex.: WhatsApp da loja',
+      });
+      if (!name) return;
+      try {
+        const r = await api('/channels/web', { method: 'POST', body: { name } });
+        this.qrModal(r.channel.id, box);
+      } catch (err) {
+        UI.err(err);
+      }
+    };
+    box.onclick = async (e) => {
+      const edit = e.target.closest('[data-edit]');
+      const disc = e.target.closest('[data-disconnect]');
+      const qr = e.target.closest('[data-qr]');
+      if (qr) {
+        try {
+          await api(`/channels/${qr.dataset.qr}/connect`, { method: 'POST' });
+          this.qrModal(Number(qr.dataset.qr), box);
+        } catch (err) {
+          UI.err(err);
+        }
+      }
+      if (disc) {
+        if (
+          !(await UI.confirm(
+            'Desconectar esta conexão? O histórico de conversas é mantido, mas novas mensagens deixam de chegar e de ser enviadas.',
+            { danger: true, okLabel: 'Desconectar' },
+          ))
+        )
+          return;
+        try {
+          UI.ok((await api(`/channels/${disc.dataset.disconnect}/disconnect`, { method: 'POST' })).message);
+          this.whatsapp(box);
+        } catch (err) {
+          UI.err(err);
+        }
+      }
+      if (edit) {
+        const m = UI.modal({
+          title: 'Atualizar credenciais',
+          body: `<form id="waEdit">${credentialFields(false, social(channels.find((c) => c.id === Number(edit.dataset.edit))))}<p class="small muted">Deixe em branco o que não mudou. Informar um novo token reconecta o canal.</p></form>`,
+          footer:
+            '<button class="btn secondary" data-close>Cancelar</button><button class="btn" type="submit" form="waEdit">Salvar</button>',
+        });
+        const f = m.el.querySelector('#waEdit');
+        f.onsubmit = async (ev) => {
+          ev.preventDefault();
+          try {
+            const r = await api(`/channels/${edit.dataset.edit}`, { method: 'PUT', body: clean(UI.formData(f)) });
+            UI.ok(r.message);
+            m.close();
+            this.whatsapp(box);
+          } catch (err) {
+            UI.showErrors(f, err);
+          }
+        };
+      }
+    };
+  },
+
+  // Mostra o QR Code e acompanha a leitura pelo celular até conectar.
+  qrModal(channelId, box) {
+    let timer;
+    const m = UI.modal({
+      title: 'Conectar pelo QR Code',
+      body: `<div class="qr-box"><div id="qrArea" class="qr-area"><p class="muted">Gerando QR Code...</p></div>
+        <ol class="small qr-steps"><li>Abra o <strong>WhatsApp</strong> no celular da empresa.</li>
+        <li>Toque em <strong>Mais opções (⋮)</strong> ou <strong>Configurações</strong> e depois em <strong>Aparelhos conectados</strong>.</li>
+        <li>Toque em <strong>Conectar um aparelho</strong> e aponte a câmera para este código.</li></ol></div>`,
+      footer: '<button class="btn secondary" data-close>Fechar</button>',
+      onClose: () => {
+        clearTimeout(timer);
+        this.whatsapp(box);
+      },
+    });
+    const area = m.el.querySelector('#qrArea');
+    const poll = async () => {
+      try {
+        const s = await api(`/channels/${channelId}/qr`);
+        if (s.status === 'connected') {
+          area.innerHTML =
+            '<div class="qr-done">✓</div><p><strong>WhatsApp conectado!</strong></p><p class="small muted">As novas mensagens vão aparecer em Conversas.</p>';
+          return;
+        }
+        if (s.status === 'disconnected' || s.status === 'error') {
+          area.innerHTML = `<div class="alert warning small">${UI.esc(s.last_error || 'Conexão interrompida.')}</div><button class="btn" id="qrRetry">Gerar novo QR Code</button>`;
+          area.querySelector('#qrRetry').onclick = async () => {
+            area.innerHTML = '<p class="muted">Gerando QR Code...</p>';
+            await api(`/channels/${channelId}/connect`, { method: 'POST' });
+            timer = setTimeout(poll, 1500);
+          };
+          return;
+        }
+        if (s.qr) area.innerHTML = `<img src="${UI.attr(s.qr)}" alt="QR Code do WhatsApp" width="260" height="260">`;
+      } catch (err) {
+        area.innerHTML = `<div class="alert danger small">${UI.esc(err.message)}</div>`;
+        return;
+      }
+      timer = setTimeout(poll, 2000);
+    };
+    poll();
+  },
+
+  async respostas(box) {
+    const { quick_replies: list } = await api('/quick-replies');
+    const canEdit = CRM.isManager();
+    box.innerHTML = `<div class="grid cols-2"><div class="card"><h3>Respostas rápidas</h3>
+      <p class="small muted">No chat, digite <span class="mono">/</span> e o atalho para inserir o texto. Use <span class="mono">{nome}</span> para o primeiro nome do cliente.</p>
+      ${list.length ? `<div class="table-wrap"><table><thead><tr><th>Atalho</th><th>Texto</th>${canEdit ? '<th></th>' : ''}</tr></thead><tbody>${list.map((r) => `<tr><td class="mono">/${UI.esc(r.shortcut)}</td><td class="small">${UI.esc(r.body)}</td>${canEdit ? `<td class="nowrap"><button class="btn ghost sm" data-edit="${r.id}">Editar</button><button class="btn ghost sm" data-del="${r.id}">Excluir</button></td>` : ''}</tr>`).join('')}</tbody></table></div>` : UI.empty('Nenhuma resposta rápida', canEdit ? 'Crie a primeira ao lado.' : 'Peça a um supervisor para cadastrar.')}</div>
+      ${canEdit ? `<div class="card"><h3>Nova resposta</h3><form id="qrForm">${UI.field('shortcut', 'Atalho', UI.input('shortcut', '', 'required maxlength="30" placeholder="ex.: preco"'), { required: true, hint: 'Letras, números, "-" ou "_", sem espaços.' })}${UI.field('body', 'Texto', UI.textarea('body', '', 'rows="5" required'), { required: true })}<button class="btn">Salvar</button></form></div>` : ''}</div>`;
+    const form = box.querySelector('#qrForm');
+    if (form)
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        try {
+          UI.ok((await api('/quick-replies', { method: 'POST', body: UI.formData(form) })).message);
+          this.respostas(box);
+        } catch (err) {
+          UI.showErrors(form, err);
+        }
+      };
+    box.onclick = async (e) => {
+      const del = e.target.closest('[data-del]');
+      const edit = e.target.closest('[data-edit]');
+      try {
+        if (del && (await UI.confirm('Excluir esta resposta rápida?', { danger: true, okLabel: 'Excluir' }))) {
+          UI.ok((await api(`/quick-replies/${del.dataset.del}`, { method: 'DELETE' })).message);
+          this.respostas(box);
+        }
+        if (edit) {
+          const r = list.find((x) => x.id === Number(edit.dataset.edit));
+          const body = await UI.prompt(`Texto de /${r.shortcut}`, { title: 'Editar resposta rápida', multiline: true });
+          if (body) {
+            UI.ok((await api(`/quick-replies/${r.id}`, { method: 'PUT', body: { body } })).message);
+            this.respostas(box);
+          }
+        }
+      } catch (err) {
+        UI.err(err);
+      }
+    };
   },
 
   backup(box) {

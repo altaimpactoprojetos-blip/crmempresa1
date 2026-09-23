@@ -1,4 +1,8 @@
 'use strict';
+const greeting = () => {
+  const h = new Date().getHours();
+  return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+};
 CRM.pages.dashboard = {
   async render(el) {
     this.el = el;
@@ -14,18 +18,18 @@ CRM.pages.dashboard = {
     el.innerHTML =
       CRM.pageHeader(
         'Dashboard',
-        `Visão geral de ${new Date().toLocaleDateString('pt-BR')}. Indicadores calculados a partir dos registros reais.`,
+        `${greeting()}, ${CRM.user.name.split(' ')[0]}. Resumo de ${new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}.`,
         `<a class="btn secondary" href="#/atendimentos?novo=1">Abrir atendimento</a><a class="btn" href="#/clientes?novo=1">Novo cliente</a>`,
       ) +
       `<div class="grid cols-4 mb">
-      ${kpi('Em espera', t.waiting, 'aguardando atendimento', t.waiting ? 'warn' : '')}
-      ${kpi('Abertos', t.open, 'em andamento no total')}
-      ${kpi('Resolvidos', t.resolved, 'no total', 'ok')}
-      ${kpi('Tarefas atrasadas', rep.tasks.overdue, CRM.isManager() ? 'da equipe' : 'suas', rep.tasks.overdue ? 'danger' : '')}
-      ${kpi('1ª resposta (média)', UI.fmtDuration(t.avg_first_response_s), t.first_response_samples ? `${t.first_response_samples} atendimento(s)` : 'sem dados suficientes')}
-      ${kpi('Resolução (média)', UI.fmtDuration(t.avg_resolution_s), t.resolved ? `${t.resolved} resolvido(s)` : 'sem dados suficientes')}
-      ${kpi('Oportunidades abertas', o.open, UI.fmtMoney(o.open_value))}
-      ${kpi('Conversão', o.conversion == null ? '—' : Math.round(o.conversion * 100) + '%', o.decided ? `${o.won} ganhos / ${o.lost} perdidos` : 'sem negócios encerrados', o.conversion != null ? 'ok' : '')}
+      ${kpi('Em espera', t.waiting, 'aguardando atendimento', t.waiting ? 'warn' : '', 'hourglass')}
+      ${kpi('Abertos', t.open, 'em andamento no total', '', 'tickets')}
+      ${kpi('Resolvidos', t.resolved, 'no total', 'ok', 'check')}
+      ${kpi('Tarefas atrasadas', rep.tasks.overdue, CRM.isManager() ? 'da equipe' : 'suas', rep.tasks.overdue ? 'danger' : '', 'alert')}
+      ${kpi('1ª resposta (média)', UI.fmtDuration(t.avg_first_response_s), t.first_response_samples ? `${t.first_response_samples} atendimento(s)` : 'sem dados suficientes', '', 'zap')}
+      ${kpi('Resolução (média)', UI.fmtDuration(t.avg_resolution_s), t.resolved ? `${t.resolved} resolvido(s)` : 'sem dados suficientes', '', 'clock')}
+      ${kpi('Oportunidades abertas', o.open, UI.fmtMoney(o.open_value), '', 'money')}
+      ${kpi('Conversão', o.conversion == null ? '—' : Math.round(o.conversion * 100) + '%', o.decided ? `${o.won} ganhos / ${o.lost} perdidos` : 'sem negócios encerrados', o.conversion != null ? 'ok' : '', 'target')}
     </div>
     ${!hasData ? `<div class="card"><div class="empty"><strong>Ainda não há dados para exibir</strong>Comece cadastrando um cliente e abrindo o primeiro atendimento.</div><div class="ql"><a href="#/clientes?novo=1">+ Cadastrar cliente</a><a href="#/atendimentos?novo=1">+ Abrir atendimento</a><a href="#/configuracoes">Configurar empresa e equipe</a></div></div>` : ''}
     <div class="grid cols-2">
@@ -59,8 +63,8 @@ CRM.pages.dashboard = {
             : UI.empty('Sem dados', 'Nenhum atendimento registrado.')
         }</div>
     </div>`;
-    function kpi(label, value, sub, cls = '') {
-      return `<div class="kpi ${cls}"><div class="label">${label}</div><div class="value">${value ?? 0}</div><div class="sub">${sub || ''}</div></div>`;
+    function kpi(label, value, sub, cls = '', icon = '') {
+      return `<div class="kpi ${cls}"><div class="label">${label}</div>${icon ? `<div class="kpi-icon">${UI.icons[icon]}</div>` : ''}<div class="value">${value ?? 0}</div><div class="sub">${sub || ''}</div></div>`;
     }
     function ticketList(list, et, es) {
       if (!list.length) return UI.empty(et, es);

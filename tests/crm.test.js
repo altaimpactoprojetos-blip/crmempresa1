@@ -446,9 +446,10 @@ test('configurações: identidade visual, etapas do funil e auditoria', async ()
     );
 });
 
-test('whatsapp: desconectado sem credenciais, sem simulação', async () => {
-  const st = (await at1.get('/whatsapp/status')).data;
-  assert.equal(st.connected, false);
-  assert.equal((await at1.post('/whatsapp/send', { customer_id: customerId, body: 'oi' })).status, 503);
-  assert.equal((await fetch(base + '/api/whatsapp/webhook?hub.mode=subscribe')).status, 404);
+test('whatsapp: sem canal conectado nada é enviado nem simulado', async () => {
+  assert.deepEqual((await at1.get('/channels')).data.channels, []);
+  const r = await at1.post('/inbox/conversations', { customer_id: customerId });
+  assert.equal(r.status, 409);
+  assert.match(r.data.error, /Nenhum WhatsApp conectado/);
+  assert.equal((await fetch(base + '/api/webhooks/whatsapp/chave-inexistente?hub.mode=subscribe')).status, 404);
 });

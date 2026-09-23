@@ -13,6 +13,7 @@
     "dev": "node --watch src/server.js",
     "migrate": "node scripts/migrate.js",
     "create-admin": "node scripts/create-admin.js",
+    "create-platform-admin": "node scripts/create-platform-admin.js",
     "seed:demo": "node scripts/seed-demo.js",
     "backup": "bash scripts/backup.sh",
     "restore": "bash scripts/restore.sh",
@@ -24,6 +25,7 @@
     "check": "npm run lint && npm run format:check && npm test"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "bcryptjs": "^2.4.3",
     "connect-pg-simple": "^10.0.0",
     "cookie-parser": "^1.4.7",
@@ -34,6 +36,7 @@
     "helmet": "^8.0.0",
     "nodemailer": "^6.9.16",
     "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {

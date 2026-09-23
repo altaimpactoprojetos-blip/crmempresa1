@@ -9,9 +9,10 @@ CRM.pages.pipeline = {
         'Arraste os cartões entre as etapas. A etapa comercial é independente do status do atendimento.',
         `<button class="btn secondary" id="btnExport">Exportar CSV</button><button class="btn" id="btnNew">+ Nova oportunidade</button>`,
       ) +
-      `<form class="filters" id="filters"><div class="field grow"><label>Busca</label><input name="q" value="${UI.attr(query.q || '')}" placeholder="Título, cliente ou empresa"></div>
+      `<div class="tabs" id="pipeTabs" hidden></div>
+      <form class="filters" id="filters">${query.pipeline_id ? `<input type="hidden" name="pipeline_id" value="${UI.attr(query.pipeline_id)}">` : ''}<div class="field grow"><label>Busca</label><input name="q" value="${UI.attr(query.q || '')}" placeholder="Título, cliente ou empresa"></div>
       ${CRM.isManager() ? `<div class="field"><label>Responsável</label>${UI.select('owner_id', UI.userOptions(CRM.users, { blank: 'Todos' }), query.owner_id)}</div>` : ''}
-      <button class="btn secondary">Filtrar</button><a class="btn ghost" href="#/funil">Limpar</a></form><div id="board"></div>`;
+      <button class="btn secondary">Filtrar</button><a class="btn ghost" href="#/funil${query.pipeline_id ? `?pipeline_id=${encodeURIComponent(query.pipeline_id)}` : ''}">Limpar</a></form><div id="board"></div>`;
     el.querySelector('#filters').onsubmit = (e) => {
       e.preventDefault();
       const d = UI.formData(e.target);
@@ -21,7 +22,11 @@ CRM.pages.pipeline = {
       });
       location.hash = `#/funil?${qs}`;
     };
-    el.querySelector('#btnNew').onclick = () => this.form({}, () => this.board());
+    el.querySelector('#btnNew').onclick = () => this.form({ pipelineId: this.pipeline?.id }, () => this.board());
+    el.querySelector('#pipeTabs').onclick = (e) => {
+      const b = e.target.closest('button[data-pipeline]');
+      if (b) location.hash = `#/funil?pipeline_id=${b.dataset.pipeline}`;
+    };
     el.querySelector('#btnExport').onclick = () => UI.download('/opportunities/export.csv');
     await this.board();
     if (id) this.detail(id);
@@ -30,10 +35,22 @@ CRM.pages.pipeline = {
   async board() {
     const box = this.el.querySelector('#board');
     if (!box) return;
-    const r = await api('/opportunities', { query: { q: this.query.q, owner_id: this.query.owner_id } });
+    const r = await api('/opportunities', {
+      query: { q: this.query.q, owner_id: this.query.owner_id, pipeline_id: this.query.pipeline_id },
+    });
     this.stages = r.stages;
+    this.pipeline = r.pipeline;
+    const tabs = this.el.querySelector('#pipeTabs');
+    // Abas só aparecem quando a empresa tem mais de um funil
+    tabs.hidden = r.pipelines.length < 2;
+    tabs.innerHTML = r.pipelines
+      .map(
+        (p) =>
+          `<button data-pipeline="${p.id}" class="${p.id === r.pipeline.id ? 'active' : ''}">${UI.esc(p.name)}</button>`,
+      )
+      .join('');
     if (!r.opportunities.length && !this.query.q && !this.query.owner_id) {
-      box.innerHTML = `<div class="card">${UI.empty('Nenhuma oportunidade no funil', 'Crie a primeira oportunidade a partir de um cliente ou pelo botão acima.')}</div>`;
+      box.innerHTML = `<div class="card">${UI.empty(`Nenhuma oportunidade em "${r.pipeline.name}"`, 'Crie a primeira oportunidade a partir de um cliente ou pelo botão acima.')}</div>`;
       return;
     }
     box.innerHTML = `<div class="kanban">${r.stages
@@ -97,9 +114,24 @@ CRM.pages.pipeline = {
     }
   },
 
-  async form({ customer, ticket_id, opp } = {}, onSaved) {
+  // Funis com etapas (cache curto: muda pouco e é usado no formulário e no detalhe)
+  async pipelines(force = false) {
+    if (!this._pipelines || force || Date.now() - this._pipelinesAt > 60000) {
+      this._pipelines = (await api('/pipelines')).pipelines;
+      this._pipelinesAt = Date.now();
+    }
+    return this._pipelines;
+  },
+
+  stageOptions(pipeline) {
+    return (pipeline?.stages || []).filter((s) => s.kind === 'open' && s.active).map((s) => [s.id, s.name]);
+  },
+
+  async form({ customer, ticket_id, opp, pipelineId } = {}, onSaved) {
     const isEdit = Boolean(opp);
-    if (!this.stages) this.stages = (await api('/settings/stages')).stages;
+    const [pipelines, fieldDefs] = await Promise.all([this.pipelines(), CRM.loadCustomFields()]);
+    const defs = fieldDefs.opportunity;
+    const pipeline = pipelines.find((p) => p.id === pipelineId) || pipelines.find((p) => p.is_default) || pipelines[0];
     const m = UI.modal({
       title: isEdit ? 'Editar oportunidade' : 'Nova oportunidade',
       body: `<form id="oppForm">
@@ -107,26 +139,35 @@ CRM.pages.pipeline = {
       ${UI.field('title', 'Título', UI.input('title', opp?.title, 'required placeholder="ex.: Plano anual — 10 licenças"'), { required: true })}
       <div class="form-row cols-3">${UI.field('value', 'Valor estimado (R$)', UI.input('value', opp ? Number(opp.value).toFixed(2).replace('.', ',') : '', 'data-type="money" placeholder="0,00"'))}
         ${UI.field('owner_id', 'Responsável', UI.select('owner_id', UI.userOptions(CRM.users, { filter: CRM.isManager() ? null : (u) => u.id === CRM.user.id }), opp ? opp.owner_id : CRM.user.id, 'data-type="int"'))}
-        ${
-          isEdit
-            ? ''
-            : UI.field(
-                'stage_id',
-                'Etapa inicial',
-                UI.select(
-                  'stage_id',
-                  this.stages.filter((s) => s.kind === 'open' && s.active).map((s) => [s.id, s.name]),
-                  '',
-                  'data-type="int"',
-                ),
-              )
-        }</div>
+        ${isEdit ? '' : UI.field('stage_id', 'Etapa inicial', UI.select('stage_id', this.stageOptions(pipeline), '', 'data-type="int"'))}</div>
+      ${
+        !isEdit && pipelines.length > 1
+          ? UI.field(
+              'pipeline_id',
+              'Funil',
+              UI.select(
+                'pipeline_id',
+                pipelines.map((p) => [p.id, p.name]),
+                pipeline.id,
+                'data-type="int"',
+              ),
+            )
+          : ''
+      }
       <div class="form-row">${UI.field('next_action', 'Próxima ação', UI.input('next_action', opp?.next_action, 'data-type="nullable" placeholder="ex.: Enviar proposta revisada"'))}${UI.field('next_action_at', 'Quando', `<input type="datetime-local" name="next_action_at" value="${UI.toLocalInput(opp?.next_action_at)}">`)}</div>
       ${UI.field('expected_close_date', 'Previsão de fechamento', `<input type="date" name="expected_close_date" data-type="nullable" value="${UI.attr(opp?.expected_close_date ? String(opp.expected_close_date).slice(0, 10) : '')}">`)}
+      ${defs.length ? `<div class="form-row">${UI.customInputs(defs, opp?.custom)}</div>` : ''}
       ${ticket_id ? `<input type="hidden" name="ticket_id" value="${ticket_id}" data-type="int">` : ''}${isEdit ? `<input type="hidden" name="version" value="${opp.version}" data-type="int">` : ''}</form>`,
       footer: `<button class="btn secondary" data-close>Cancelar</button><button class="btn" type="submit" form="oppForm">${isEdit ? 'Salvar' : 'Criar oportunidade'}</button>`,
     });
     const form = m.el.querySelector('#oppForm');
+    if (form.pipeline_id)
+      form.pipeline_id.onchange = () => {
+        const p = pipelines.find((x) => x.id === Number(form.pipeline_id.value));
+        form.stage_id.innerHTML = this.stageOptions(p)
+          .map(([v, l]) => `<option value="${v}">${UI.esc(l)}</option>`)
+          .join('');
+      };
     if (!customer && !isEdit)
       CRM.pages.tickets.customerPicker(
         form.querySelector('#custSearch'),
@@ -156,24 +197,30 @@ CRM.pages.pipeline = {
   },
 
   async detail(id) {
-    let r;
+    let r, pipelines, fieldDefs;
     try {
-      r = await api(`/opportunities/${id}`);
+      [r, pipelines, fieldDefs] = await Promise.all([
+        api(`/opportunities/${id}`),
+        this.pipelines(),
+        CRM.loadCustomFields(),
+      ]);
     } catch (err) {
       return UI.err(err);
     }
     const o = r.opportunity;
-    const openStages = (this.stages || []).filter((s) => s.active);
+    // Só é possível mover para etapas do mesmo funil da oportunidade
+    const pipeline = pipelines.find((p) => p.id === o.pipeline_id);
+    const openStages = (pipeline?.stages || []).filter((s) => s.active);
     const m = UI.modal({
       title: o.title,
       size: 'wide',
       body: `<div class="grid cols-2">
       <div><table class="small"><tbody><tr><th>Cliente</th><td><a href="#/clientes/${o.customer_id}">${UI.esc(o.customer_name)}</a>${o.customer_company ? ` · ${UI.esc(o.customer_company)}` : ''}</td></tr>
-        <tr><th>Etapa</th><td><span class="badge ${o.stage_kind === 'won' ? 'success' : o.stage_kind === 'lost' ? 'danger' : 'primary'}">${UI.esc(o.stage_name)}</span></td></tr>
+        ${pipelines.length > 1 ? `<tr><th>Funil</th><td>${UI.esc(o.pipeline_name)}</td></tr>` : ''}<tr><th>Etapa</th><td><span class="badge ${o.stage_kind === 'won' ? 'success' : o.stage_kind === 'lost' ? 'danger' : 'primary'}">${UI.esc(o.stage_name)}</span></td></tr>
         <tr><th>Valor</th><td>${UI.fmtMoney(o.value)}</td></tr><tr><th>Responsável</th><td>${UI.esc(o.owner_name || '—')}</td></tr>
         <tr><th>Próxima ação</th><td>${UI.esc(o.next_action || '—')} ${o.next_action_at ? `<span class="muted">(${UI.fmtDateTime(o.next_action_at)})</span>` : ''}</td></tr>
         <tr><th>Previsão</th><td>${UI.fmtDate(o.expected_close_date)}</td></tr>${o.lost_reason ? `<tr><th>Motivo da perda</th><td>${UI.esc(o.lost_reason)}</td></tr>` : ''}
-        <tr><th>Criada em</th><td>${UI.fmtDateTime(o.created_at)}</td></tr>${o.closed_at ? `<tr><th>Encerrada em</th><td>${UI.fmtDateTime(o.closed_at)}</td></tr>` : ''}</tbody></table>
+        ${UI.customRows(fieldDefs.opportunity, o.custom)}<tr><th>Criada em</th><td>${UI.fmtDateTime(o.created_at)}</td></tr>${o.closed_at ? `<tr><th>Encerrada em</th><td>${UI.fmtDateTime(o.closed_at)}</td></tr>` : ''}</tbody></table>
         <div class="flex wrap mt"><label class="small">Mover para:</label>${UI.select('stage', [['', '—'], ...openStages.filter((s) => s.id !== o.stage_id).map((s) => [s.id, s.name])], '', 'id="moveSel" style="width:auto"')}<button class="btn sm" id="moveBtn">Mover</button></div>
         <h4 class="mt">Tarefas</h4>${r.tasks.length ? r.tasks.map((t) => `<div class="small">${t.done_at ? '✅' : '⬜'} ${UI.esc(t.title)} <span class="muted">· ${UI.fmtDateTime(t.due_at)}</span></div>`).join('') : '<p class="muted small">Nenhuma tarefa.</p>'}<button class="btn sm secondary mt" id="taskBtn">+ Tarefa</button></div>
       <div><h4>Histórico</h4><ul class="timeline">${r.events.map((e) => `<li class="system"><span class="tl-dot"></span><div><div class="tl-meta">${UI.esc(e.user_name || '')} · ${UI.fmtDateTime(e.created_at)}</div><div class="tl-body">${UI.esc(e.body)}</div></div></li>`).join('')}</ul></div></div>`,
