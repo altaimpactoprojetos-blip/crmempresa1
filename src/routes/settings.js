@@ -4,6 +4,7 @@ const { isValidTimezone } = require('../lib/timezone');
 const { z } = require('zod');
 const { query, tx } = require('../db');
 const config = require('../config');
+const { MODULES } = require('../lib/permissions');
 const { validate } = require('../middleware/validate');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { audit } = require('../lib/audit');
@@ -199,6 +200,38 @@ router.put(
       });
       await audit(req, 'stages_update', 'pipeline_stages', null, { count: list.length });
       res.json({ stages: out, message: 'Etapas do funil atualizadas.' });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// Permissões por módulo (Gestor e Atendente)
+router.get('/permissions', requireRole('admin'), async (_req, res, next) => {
+  try {
+    const row = (await query('SELECT permissions FROM company_settings WHERE company_id = app_company_id()')).rows[0];
+    res.json({ modules: MODULES, permissions: row ? row.permissions : {} });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const moduleFlags = z.object(Object.fromEntries(Object.keys(MODULES).map((k) => [k, z.boolean()]))).partial();
+router.put(
+  '/permissions',
+  requireRole('admin'),
+  validate(z.object({ supervisor: moduleFlags, atendente: moduleFlags })),
+  async (req, res, next) => {
+    try {
+      await query(
+        'UPDATE company_settings SET permissions = $1, updated_at = now() WHERE company_id = app_company_id()',
+        [JSON.stringify(req.data)],
+      );
+      await audit(req, 'permissions_update', 'company_settings', req.user.company_id, req.data);
+      res.json({
+        ok: true,
+        message: 'Permissões atualizadas. Valem no próximo carregamento da página de cada pessoa.',
+      });
     } catch (err) {
       next(err);
     }

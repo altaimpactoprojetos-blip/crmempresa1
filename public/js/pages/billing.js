@@ -17,6 +17,8 @@ CRM.pages.billing = {
     REFUNDED: ['Estornado', ''],
   },
 
+  BILLING_TYPE: { PIX: 'Pix', BOLETO: 'Boleto', CREDIT_CARD: 'Cartão de crédito' },
+
   async render(el) {
     this.el = el;
     const [data, me] = await Promise.all([api('/billing'), api('/auth/me')]);
@@ -42,6 +44,7 @@ CRM.pages.billing = {
       const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
       return `<div class="usage"><div class="usage-bar"><span style="width:${max ? pct : 4}%" class="${pct >= 100 ? 'full' : ''}"></span></div><span class="small">${used} de ${max ?? 'ilimitado'}</span></div>`;
     };
+    const count = (n, note) => `<div class="usage"><strong>${n}</strong><span class="small muted">${note}</span></div>`;
     const feature = (ok, label) => `<li class="${ok ? '' : 'off'}">${ok ? '✓' : '—'} ${label}</li>`;
     const planCard = (p) => {
       const isCurrent = p.id === c.plan;
@@ -59,11 +62,20 @@ CRM.pages.billing = {
       (c.block_text
         ? `<div class="alert danger"><strong>Acesso bloqueado.</strong> ${UI.esc(c.block_text)}${isAdmin ? '' : ' Fale com o administrador da sua empresa.'}</div>`
         : '') +
-      `<div class="grid cols-2"><div class="card"><div class="flex between"><h3>Plano atual: ${UI.esc(current ? current.name : c.plan)}</h3><span class="badge ${statusCls}">${statusLabel}</span></div>
+      `<div class="grid cols-2"><div class="card plan-hero"><div class="flex between"><span class="small muted upper">Plano atual</span><span class="badge ${statusCls}">${statusLabel}</span></div>
+          <h2>${UI.esc(current ? current.name : c.plan)}</h2>
+          <div class="plan-price">${current && current.price_cents ? `${UI.fmtMoney(current.price_cents / 100)}<span>/mês</span>` : 'Sem cobrança'}</div>
           ${lines.map((l) => `<p class="small">${UI.esc(l)}</p>`).join('')}
-          ${isAdmin && c.has_subscription ? '<button class="btn ghost sm" id="cancelSub">Cancelar renovação</button>' : ''}</div>
-        <div class="card"><h3>Uso</h3><p class="small muted">Usuários ativos</p>${bar(data.usage.users, current?.max_users)}
-          <p class="small muted mt">Canais conectados</p>${bar(data.usage.channels, current?.max_channels)}</div></div>
+          <div class="plan-facts">
+            <div><span class="small muted">Próxima cobrança</span><strong>${data.next_payment ? `${UI.fmtDate(data.next_payment.due_date)} · ${UI.fmtMoney(data.next_payment.value_cents / 100)}` : c.current_period_end ? UI.fmtDate(c.current_period_end) : '—'}</strong></div>
+            <div><span class="small muted">Forma de pagamento</span><strong>${this.BILLING_TYPE[data.last_billing_type] || (c.has_subscription ? 'Escolhida na hora de pagar' : '—')}</strong></div></div>
+          ${current ? `<ul class="plan-features mt">${feature(true, 'Funis, clientes, atendimentos, tarefas e relatórios')}${feature(current.features.automations, 'Automações do funil')}${feature(current.features.chatbot, 'Robô de atendimento')}</ul>` : ''}
+          ${isAdmin && c.has_subscription ? '<button class="btn ghost sm mt" id="cancelSub">Cancelar renovação</button>' : ''}</div>
+        <div class="card"><h3>Utilização</h3>
+          <p class="small muted">Usuários ativos</p>${bar(data.usage.users, current?.max_users)}
+          <p class="small muted mt">Canais conectados (WhatsApp, Instagram, Messenger)</p>${bar(data.usage.channels, current?.max_channels)}
+          <p class="small muted mt">Clientes cadastrados</p>${count(data.usage.customers, 'sem limite no plano')}
+          <p class="small muted mt">Atendimentos neste mês</p>${count(data.usage.tickets_month, 'sem limite no plano')}</div></div>
       ${isAdmin ? `<h3 class="mt">Planos</h3>${data.billing_enabled ? '' : '<div class="alert info small">O pagamento on-line ainda não foi ativado. Escolha o plano e fale com o suporte para assinar.</div>'}` : ''}
       <div class="grid cols-3">${data.plans
         .filter((p) => p.public || p.id === c.plan)

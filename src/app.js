@@ -33,10 +33,23 @@ app.use(sessionMiddleware);
 app.use('/api', csrfGuard, loadUser, apiRoutes, apiNotFound);
 
 // Frontend estático (SPA): qualquer outra rota devolve o index.html.
-app.use(express.static(PUBLIC_DIR, { maxAge: config.env === 'production' ? '1h' : 0, etag: true }));
+// HTML, JS e CSS são sempre revalidados (ETag) para uma atualização aparecer na hora; fontes ficam em cache.
+app.use(
+  express.static(PUBLIC_DIR, {
+    etag: true,
+    maxAge: config.env === 'production' ? '7d' : 0,
+    setHeaders: (res, file) => {
+      if (/\.(html|js|css)$/.test(file)) res.setHeader('Cache-Control', 'no-cache');
+    },
+  }),
+);
 // Painel do dono da plataforma (página separada do CRM das empresas)
-app.get('/plataforma', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'plataforma.html')));
-app.get('*', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+const sendPage = (file) => (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(path.join(PUBLIC_DIR, file));
+};
+app.get('/plataforma', sendPage('plataforma.html'));
+app.get('*', sendPage('index.html'));
 
 app.use(errorHandler);
 

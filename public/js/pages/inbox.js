@@ -19,7 +19,7 @@ CRM.pages.inbox = {
     this.replies = replies.quick_replies;
     // Todas as etapas de todos os funis; o seletor mostra só as do funil da oportunidade
     CRM.stages = stages.pipelines.flatMap((p) => p.stages);
-    el.innerHTML = `<div class="inbox">
+    el.innerHTML = `<div class="inbox ${this.sideOpen() ? 'with-side' : ''}">
       <section class="inbox-list">
         <div class="inbox-list-head">
           <h1>Conversas</h1>
@@ -29,6 +29,7 @@ CRM.pages.inbox = {
         <div id="convItems" class="inbox-items"></div>
       </section>
       <section class="inbox-chat" id="chat"></section>
+      <aside class="inbox-side" id="convSide"></aside>
     </div>`;
     el.querySelector('#convFilters').onclick = (e) => {
       const b = e.target.closest('[data-filter]');
@@ -48,6 +49,87 @@ CRM.pages.inbox = {
     await this.loadList();
     if (this.currentId) await this.open(this.currentId);
     else this.renderPlaceholder();
+  },
+
+  // Painel lateral com os dados do cliente (aberto por padrão em telas largas)
+  sideOpen() {
+    try {
+      const v = localStorage.getItem('crm.inboxSide');
+      if (v) return v === 'open';
+    } catch (_) {
+      /* sem preferência salva */
+    }
+    return window.innerWidth >= 1280;
+  },
+
+  async loadSide(force = false) {
+    const box = this.el.querySelector('#convSide');
+    const c = this.conv;
+    if (!box || !c || !this.sideOpen()) return;
+    if (!force && this.sideFor === c.id) return; // atualizações em tempo real não recarregam o painel
+    this.sideFor = c.id;
+    if (!c.customer_id) {
+      box.innerHTML = `<div class="side-sec">${UI.empty('Contato sem cadastro', 'Esta conversa ainda não está ligada a um cliente.')}</div>`;
+      return;
+    }
+    box.innerHTML = UI.skeleton('rows');
+    let r;
+    try {
+      r = await api(`/customers/${c.customer_id}`);
+    } catch (err) {
+      box.innerHTML = `<div class="side-sec"><div class="alert danger small">${UI.esc(err.message)}</div></div>`;
+      return;
+    }
+    if (this.sideFor !== c.id) return;
+    const cu = r.customer;
+    const openTickets = r.tickets.filter((t) => !['resolvido', 'cancelado'].includes(t.status));
+    const openOpps = r.opportunities.filter((o) => o.stage_kind === 'open');
+    const pending = r.tasks.filter((t) => !t.done_at);
+    const row = (k, v) =>
+      v ? `<div class="side-row"><span class="muted small">${k}</span><span>${v}</span></div>` : '';
+    box.innerHTML = `<div class="side-sec center"><span class="avatar lg">${UI.esc(UI.initials(cu.name))}</span><h3>${UI.esc(cu.name)}</h3>
+        <div class="muted small">${UI.esc([cu.company, cu.city].filter(Boolean).join(' · '))}</div>
+        <div class="side-tags">${(cu.tags || []).map((t) => `<span class="tag">${UI.esc(t)}</span>`).join('')}</div></div>
+      <div class="side-sec">${row('Telefone', UI.esc(cu.phone || ''))}${row('E-mail', UI.esc(cu.email || ''))}${row('Origem', UI.esc(cu.source || ''))}${row('Responsável pelo cliente', UI.esc(cu.owner_name || '—'))}${row('Na conversa', UI.esc(c.assignee_name || 'Sem responsável'))}</div>
+      <div class="side-sec"><h4>Oportunidades abertas</h4>${
+        openOpps.length
+          ? openOpps
+              .slice(0, 3)
+              .map(
+                (o) =>
+                  `<a class="side-item" href="#/funil/${o.id}"><strong>${UI.esc(o.title)}</strong><span class="small muted">${UI.esc(o.stage_name)} · ${UI.fmtMoney(o.value)}</span></a>`,
+              )
+              .join('')
+          : '<p class="small muted">Nenhuma.</p>'
+      }</div>
+      <div class="side-sec"><h4>Atendimentos em aberto</h4>${
+        openTickets.length
+          ? openTickets
+              .slice(0, 3)
+              .map(
+                (t) =>
+                  `<a class="side-item" href="#/atendimentos/${t.id}"><strong>${UI.esc(t.subject)}</strong><span class="small muted mono">${UI.esc(t.protocol)}</span></a>`,
+              )
+              .join('')
+          : '<p class="small muted">Nenhum.</p>'
+      }</div>
+      <div class="side-sec"><h4>Tarefas pendentes (${pending.length})</h4>${pending
+        .slice(0, 3)
+        .map(
+          (t) =>
+            `<div class="side-item"><strong>${UI.esc(t.title)}</strong><span class="small muted">${t.due_at ? UI.fmtDateTime(t.due_at) : 'sem prazo'}</span></div>`,
+        )
+        .join('')}</div>
+      <div class="side-sec side-actions"><a class="btn secondary sm" href="#/clientes/${cu.id}">Ver cliente</a>
+        <button class="btn secondary sm" data-side="ticket">Abrir atendimento</button><button class="btn secondary sm" data-side="task">Nova tarefa</button>
+        <button class="btn secondary sm" data-side="opp">Nova oportunidade</button></div>`;
+    const refresh = () => this.loadSide(true);
+    box.querySelector('.side-actions').onclick = (e) => {
+      const a = e.target.closest('[data-side]')?.dataset.side;
+      if (a === 'ticket') CRM.pages.tickets.form({ customer: cu }, refresh);
+      if (a === 'task') CRM.pages.tasks.form({ customer_id: cu.id, customer_name: cu.name }, refresh);
+      if (a === 'opp') CRM.pages.pipeline.form({ customer: cu }, refresh);
+    };
   },
 
   // Atualização em tempo real (novas mensagens, status, atribuições)
@@ -137,7 +219,8 @@ CRM.pages.inbox = {
     chat.innerHTML = `<header class="chat-head">
         <button class="icon-btn chat-back" id="chatBack" aria-label="Voltar">←</button>
         <span class="avatar">${UI.esc(UI.initials(name))}</span>
-        <div class="grow"><strong>${UI.esc(name)}</strong><div class="muted small">${UI.esc(this.contactLine(c))} · ${UI.esc(c.channel_name)}${c.customer_id ? ` · <a href="#/clientes/${c.customer_id}">Ver cliente</a>` : ''}</div></div>
+        <div class="grow"><strong>${UI.esc(name)}</strong><div class="muted small">${UI.esc([...new Set([this.contactLine(c), c.channel_name])].join(' · '))}${c.customer_id ? ` · <a href="#/clientes/${c.customer_id}">Ver cliente</a>` : ''}</div></div>
+        <button class="icon-btn" id="infoBtn" title="Dados do cliente">${UI.icons.user}</button>
         ${this.stageSelect(c)}
         ${this.assignControl(c)}
         ${c.status === 'open' ? '<button class="btn secondary sm" id="closeConv">Encerrar</button>' : '<button class="btn secondary sm" id="reopenConv">Reabrir</button>'}
@@ -220,6 +303,17 @@ CRM.pages.inbox = {
     const c = this.conv;
     const $ = (s) => chat.querySelector(s);
     $('#chatBack').onclick = () => this.el.querySelector('.inbox').classList.remove('chat-open');
+    $('#infoBtn').onclick = () => {
+      const open = !this.sideOpen();
+      try {
+        localStorage.setItem('crm.inboxSide', open ? 'open' : 'closed');
+      } catch (_) {
+        /* preferência só nesta página */
+      }
+      this.el.querySelector('.inbox').classList.toggle('with-side', open);
+      if (open) this.loadSide(true);
+    };
+    this.loadSide();
     const act = async (fn) => {
       try {
         const r = await fn();

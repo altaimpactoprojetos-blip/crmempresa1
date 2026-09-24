@@ -2,6 +2,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { query, tx } = require('../db');
+const { requireModule } = require('../lib/permissions');
 const { validate } = require('../middleware/validate');
 const { requireAuth, isManager, requireRole } = require('../middleware/auth');
 const { badRequest, notFound, conflict, forbidden } = require('../lib/errors');
@@ -75,6 +76,13 @@ const ticketSchema = z.object({
   auto_assign: z.boolean().optional(),
 });
 
+const TICKET_SORTS = {
+  priority: `CASE t.priority WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, t.opened_at ASC`,
+  oldest: 't.opened_at ASC',
+  newest: 't.opened_at DESC',
+  updated: 't.updated_at DESC',
+};
+
 router.get('/', async (req, res, next) => {
   try {
     const params = [];
@@ -137,7 +145,7 @@ router.get('/', async (req, res, next) => {
     params.push(limit, (page - 1) * limit);
     const { rows } = await query(
       `${SELECT.replace(/FROM tickets[\s\S]*/, '')} ${base}
-      ORDER BY CASE t.priority WHEN 'urgente' THEN 0 WHEN 'alta' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, t.opened_at ASC
+      ORDER BY ${TICKET_SORTS[q.sort] || TICKET_SORTS.priority}
       LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
@@ -147,7 +155,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.get('/export.csv', async (req, res, next) => {
+router.get('/export.csv', requireModule('tickets'), async (req, res, next) => {
   try {
     const params = [];
     const where = [scopeSql(req.user, params)];

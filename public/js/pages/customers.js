@@ -20,6 +20,16 @@ CRM.pages.customers = {
       <div class="field"><label>Origem</label>${UI.select('source', [['', 'Todas'], ...this.sources.map((s) => [s, s])], query.source)}</div>
       <div class="field"><label>Responsável</label>${UI.select('owner_id', UI.userOptions(CRM.users, { blank: 'Todos' }), query.owner_id)}</div>
       <div class="field"><label>Etiqueta</label><input name="tag" value="${UI.attr(query.tag || '')}" placeholder="ex.: vip"></div>
+      <div class="field"><label>Ordenar por</label>${UI.select(
+        'sort',
+        [
+          ['recent', 'Atualizados recentemente'],
+          ['last_contact', 'Último contato'],
+          ['name', 'Nome (A-Z)'],
+          ['created', 'Cadastrados recentemente'],
+        ],
+        query.sort || 'recent',
+      )}</div>
       <div class="field"><label class="check" style="margin-top:1.4rem"><input type="checkbox" name="pending_followup" ${query.pending_followup ? 'checked' : ''}> Com retorno pendente</label></div>
       <button class="btn secondary">Filtrar</button><a class="btn ghost" href="#/clientes">Limpar</a></form>
       <div id="list"></div></div>`;
@@ -58,13 +68,16 @@ CRM.pages.customers = {
       );
       return;
     }
-    box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Nome</th><th>Contato</th><th>Empresa / Cidade</th><th>Origem</th><th>Etiquetas</th><th>Responsável</th><th>Atend. abertos</th><th>Retorno</th></tr></thead><tbody>
+    box.innerHTML = `<div class="table-wrap"><table class="table-modern"><thead><tr><th>Nome</th><th>Contato</th><th>Situação</th><th>Origem</th><th>Etiquetas</th><th>Responsável</th><th>Último contato</th><th>Retorno</th></tr></thead><tbody>
       ${r.customers
         .map(
-          (c) => `<tr class="clickable" data-href="#/clientes/${c.id}"><td><strong>${UI.esc(c.name)}</strong></td>
-        <td class="small">${UI.esc(c.phone || '')}<br><span class="muted">${UI.esc(c.email || '')}</span></td><td class="small">${UI.esc(c.company || '')}<br><span class="muted">${UI.esc(c.city || '')}</span></td>
+          (
+            c,
+          ) => `<tr class="clickable" data-href="#/clientes/${c.id}"><td><div class="cell-person"><span class="avatar sm">${UI.esc(UI.initials(c.name))}</span><span><strong>${UI.esc(c.name)}</strong><span class="muted small">${UI.esc([c.company, c.city].filter(Boolean).join(' · '))}</span></span></div></td>
+        <td class="small">${UI.esc(c.phone || '')}<br><span class="muted">${UI.esc(c.email || '')}</span></td>
+        <td>${this.statusBadge(c)}</td>
         <td class="small">${UI.esc(c.source || '—')}</td><td>${(c.tags || []).map((t) => `<span class="tag">${UI.esc(t)}</span>`).join('')}</td><td class="small">${UI.esc(c.owner_name || '—')}</td>
-        <td class="center">${c.open_tickets ? `<span class="badge primary">${c.open_tickets}</span>` : '<span class="muted">0</span>'}</td>
+        <td class="small nowrap">${c.last_contact_at ? `<span title="${UI.attr(UI.fmtDateTime(c.last_contact_at))}">${UI.esc(UI.relative(c.last_contact_at))}</span>` : '<span class="muted">—</span>'}</td>
         <td class="small">${c.next_follow_up ? `<span class="badge ${new Date(c.next_follow_up) < Date.now() ? 'danger' : 'warning'}">${UI.fmtDateTime(c.next_follow_up)}</span>` : ''}</td></tr>`,
         )
         .join('')}</tbody></table></div>
@@ -81,6 +94,96 @@ CRM.pages.customers = {
       if (pages <= 1) return `<div class="pagination muted">${total} registro(s)</div>`;
       return `<div class="pagination"><span class="muted">${total} registro(s) · página ${page} de ${pages}</span><button class="btn secondary sm" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>Anterior</button><button class="btn secondary sm" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>Próxima</button></div>`;
     }
+  },
+
+  // Números do cliente
+  summaryHtml(r) {
+    const openTickets = r.tickets.filter((t) => !['resolvido', 'cancelado'].includes(t.status)).length;
+    const openOpps = r.opportunities.filter((o) => o.stage_kind === 'open');
+    const won = r.opportunities.filter((o) => o.stage_kind === 'won');
+    const pendingTasks = r.tasks.filter((t) => !t.done_at).length;
+    const cell = (label, v, sub = '') =>
+      `<div class="perf-cell"><span class="small muted">${label}</span><strong>${v}</strong>${sub ? `<span class="small muted">${sub}</span>` : ''}</div>`;
+    return `<div class="card"><div class="perf-grid">
+      ${cell('Atendimentos', r.tickets.length, `${openTickets} em aberto`)}
+      ${cell('Em negociação', UI.fmtMoney(openOpps.reduce((a, o) => a + Number(o.value || 0), 0)), `${openOpps.length} oportunidade(s)`)}
+      ${cell('Vendas ganhas', UI.fmtMoney(won.reduce((a, o) => a + Number(o.value || 0), 0)), `${won.length} negócio(s)`)}
+      ${cell('Tarefas pendentes', pendingTasks)}</div></div>`;
+  },
+
+  // Linha do tempo única: tudo o que aconteceu com o cliente, do mais recente ao mais antigo
+  timelineHtml(c, r) {
+    const ev = [{ at: c.created_at, icon: 'user', cls: 'customer_created', text: 'Cliente cadastrado' }];
+    for (const t of r.tickets) {
+      ev.push({
+        at: t.opened_at,
+        icon: 'tickets',
+        cls: 'ticket_opened',
+        text: `Atendimento aberto: ${t.subject}`,
+        sub: t.protocol,
+        href: `#/atendimentos/${t.id}`,
+      });
+      if (t.closed_at)
+        ev.push({
+          at: t.closed_at,
+          icon: 'check',
+          cls: 'ticket_resolved',
+          text: `Atendimento ${t.status === 'cancelado' ? 'cancelado' : 'concluído'}: ${t.subject}`,
+          sub: t.protocol,
+          href: `#/atendimentos/${t.id}`,
+        });
+    }
+    for (const w of r.conversations)
+      if (w.last_message_at)
+        ev.push({
+          at: w.last_message_at,
+          icon: 'inbox',
+          cls: 'ticket_opened',
+          text: 'Última mensagem na conversa',
+          sub: w.last_message_preview,
+          href: `#/conversas/${w.id}`,
+        });
+    for (const e of r.opportunity_events || [])
+      ev.push({
+        at: e.created_at,
+        icon: 'pipeline',
+        cls: 'stage_changed',
+        text: `Venda "${e.title}"`,
+        sub: e.body,
+        href: `#/funil/${e.opportunity_id}`,
+      });
+    for (const t of r.tasks) {
+      ev.push({ at: t.created_at, icon: 'tasks', cls: 'task_created', text: `Tarefa criada: ${t.title}` });
+      if (t.done_at)
+        ev.push({ at: t.done_at, icon: 'check', cls: 'ticket_resolved', text: `Tarefa concluída: ${t.title}` });
+    }
+    for (const n of r.notes)
+      ev.push({
+        at: n.created_at,
+        icon: 'activity',
+        cls: 'task_created',
+        text: `Anotação de ${n.user_name || 'alguém da equipe'}`,
+        sub: n.body,
+      });
+    ev.sort((a, b) => new Date(b.at) - new Date(a.at));
+    const list = ev.slice(0, 25);
+    return `<div class="card"><div class="card-title"><h3>Linha do tempo</h3><span class="small muted">${ev.length} evento(s)</span></div>
+      <ul class="activity">${list
+        .map((e) => {
+          const inner = `<span class="act-icon ${e.cls}">${UI.icons[e.icon]}</span><span class="act-main"><strong>${UI.esc(e.text)}</strong>${e.sub ? `<span class="small muted">${UI.esc(String(e.sub).slice(0, 140))}</span>` : ''}</span><span class="small muted nowrap" title="${UI.attr(UI.fmtDateTime(e.at))}">${UI.esc(UI.relative(e.at))}</span>`;
+          return `<li>${e.href ? `<a href="${UI.attr(e.href)}">${inner}</a>` : `<a class="static">${inner}</a>`}</li>`;
+        })
+        .join('')}</ul></div>`;
+  },
+
+  // Situação calculada a partir dos registros reais (atendimentos abertos e último contato)
+  statusBadge(c) {
+    if (c.open_tickets)
+      return `<span class="badge primary">${c.open_tickets} atendimento${c.open_tickets > 1 ? 's' : ''} aberto${c.open_tickets > 1 ? 's' : ''}</span>`;
+    if (!c.last_contact_at) return '<span class="badge">Sem contato</span>';
+    const days = Math.floor((Date.now() - new Date(c.last_contact_at)) / 86400000);
+    if (days <= 30) return '<span class="badge success">Ativo</span>';
+    return `<span class="badge warning">Sem contato há ${days} dias</span>`;
   },
 
   // Formulário de criação/edição
@@ -177,9 +280,11 @@ CRM.pages.customers = {
         ${c.notes ? `<h4 class="mt">Observações</h4><p class="small" style="white-space:pre-wrap">${UI.esc(c.notes)}</p>` : ''}</div>
         <div class="card"><h3>Anotações internas</h3><form id="noteForm"><textarea name="body" placeholder="Escreva uma anotação visível apenas para a equipe" required></textarea><div class="right mt"><button class="btn sm">Adicionar</button></div></form>
           <ul class="timeline mt">${r.notes.map((n) => `<li class="note"><span class="tl-dot"></span><div><div class="tl-meta">${UI.esc(n.user_name || '')} · ${UI.fmtDateTime(n.created_at)}</div><div class="tl-body">${UI.esc(n.body)}</div></div></li>`).join('') || '<li class="muted small">Nenhuma anotação.</li>'}</ul></div>
-        ${r.conversations.length ? `<div class="card"><h3>Conversas no WhatsApp</h3><ul class="timeline">${r.conversations.map((w) => `<li class="interaction"><span class="tl-dot"></span><div><div class="tl-meta"><a href="#/conversas/${w.id}">${UI.esc(UI.fmtPhone(w.contact_phone))}</a> · ${w.status === 'open' ? 'Aberta' : 'Encerrada'} · ${UI.fmtDateTime(w.last_message_at)}${w.unread_count ? ` · <span class="badge success">${w.unread_count} não lida(s)</span>` : ''}</div><div class="tl-body">${UI.esc(w.last_message_preview || '')}</div></div></li>`).join('')}</ul></div>` : ''}
+        ${r.conversations.length ? `<div class="card"><h3>Conversas</h3><ul class="timeline">${r.conversations.map((w) => `<li class="interaction"><span class="tl-dot"></span><div><div class="tl-meta"><a href="#/conversas/${w.id}">${UI.esc(UI.fmtPhone(w.contact_phone))}</a> · ${w.status === 'open' ? 'Aberta' : 'Encerrada'} · ${UI.fmtDateTime(w.last_message_at)}${w.unread_count ? ` · <span class="badge success">${w.unread_count} não lida(s)</span>` : ''}</div><div class="tl-body">${UI.esc(w.last_message_preview || '')}</div></div></li>`).join('')}</ul></div>` : ''}
       </div>
       <div class="stack">
+        ${this.summaryHtml(r)}
+        ${this.timelineHtml(c, r)}
         <div class="card"><div class="card-title"><h3>Atendimentos (${r.tickets.length})</h3></div>
           ${r.tickets.length ? `<div class="table-wrap"><table><thead><tr><th>Protocolo</th><th>Assunto</th><th>Canal</th><th>Status</th><th>Responsável</th><th>Abertura</th></tr></thead><tbody>${r.tickets.map((t) => `<tr class="clickable" data-href="#/atendimentos/${t.id}"><td class="mono small">${UI.esc(t.protocol)}</td><td>${UI.esc(t.subject)}</td><td class="small">${UI.esc(t.channel)}</td><td>${UI.statusBadge(t.status)}</td><td class="small">${UI.esc(t.assignee_name || '—')}</td><td class="small nowrap">${UI.fmtDateTime(t.opened_at)}</td></tr>`).join('')}</tbody></table></div>` : UI.empty('Nenhum atendimento', 'Abra o primeiro atendimento para este cliente.')}</div>
         <div class="card"><div class="card-title"><h3>Negociações (${r.opportunities.length})</h3></div>
