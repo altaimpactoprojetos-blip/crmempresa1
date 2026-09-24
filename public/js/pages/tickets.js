@@ -4,6 +4,7 @@ CRM.pages.tickets = {
     this.el = el;
     this.id = id || null;
     this.query = query;
+    this.page = 1;
     if (id) return this.detail(el, id);
     const s = await api('/settings').catch(() => null);
     this.channels = s ? s.settings.channels : ['WhatsApp', 'Telefone', 'E-mail'];
@@ -27,6 +28,16 @@ CRM.pages.tickets = {
       <div class="field"><label>Prioridade</label>${UI.select('priority', [['', 'Todas'], ...Object.entries(UI.PRIORITY).map(([k, v]) => [k, v.label])], query.priority)}</div>
       <div class="field"><label>Canal</label>${UI.select('channel', [['', 'Todos'], ...this.channels.map((c) => [c, c])], query.channel)}</div>
       ${CRM.isManager() ? `<div class="field"><label>Responsável</label>${UI.select('assignee_id', [['', 'Todos'], ['none', 'Sem responsável'], ...CRM.users.map((u) => [u.id, u.name])], query.assignee_id)}</div>` : ''}
+      <div class="field"><label>Ordenar</label>${UI.select(
+        'sort',
+        [
+          ['priority', 'Prioridade'],
+          ['oldest', 'Mais antigos'],
+          ['newest', 'Mais recentes'],
+          ['updated', 'Atualizados recentemente'],
+        ],
+        query.sort || 'priority',
+      )}</div>
       <div class="field"><label>De</label><input type="date" name="from" value="${UI.attr(query.from || '')}"></div><div class="field"><label>Até</label><input type="date" name="to" value="${UI.attr(query.to || '')}"></div>
       <button class="btn secondary">Filtrar</button><a class="btn ghost" href="#/atendimentos?tab=${tab}">Limpar</a></form><div id="list"></div></div>`;
     this.tab = tab;
@@ -74,7 +85,9 @@ CRM.pages.tickets = {
       channel: this.query.channel,
       from: this.query.from,
       to: this.query.to,
-      limit: 100,
+      sort: this.query.sort,
+      limit: 50,
+      page: this.page || 1,
     };
     if (this.tab === 'queue') q.status = 'aguardando';
     else if (this.tab === 'mine') {
@@ -95,15 +108,26 @@ CRM.pages.tickets = {
       );
       return;
     }
-    box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Protocolo</th><th>Cliente</th><th>Assunto</th><th>Canal</th><th>Prioridade</th><th>Status</th><th>Responsável</th><th>Abertura</th><th>Retorno</th><th></th></tr></thead><tbody>
+    box.innerHTML = `<div class="table-wrap"><table class="table-modern"><thead><tr><th>Protocolo</th><th>Cliente</th><th>Assunto</th><th>Prioridade</th><th>Status</th><th>Responsável</th><th>Tempo</th><th>Retorno</th><th></th></tr></thead><tbody>
       ${r.tickets
-        .map(
-          (
-            t,
-          ) => `<tr class="clickable" data-id="${t.id}"><td class="mono small">${UI.esc(t.protocol)}</td><td><strong>${UI.esc(t.customer_name)}</strong><div class="muted small">${UI.esc(t.customer_phone || '')}</div></td><td>${UI.esc(t.subject)}</td><td class="small">${UI.esc(t.channel)}</td><td>${UI.priorityBadge(t.priority)}</td><td>${UI.statusBadge(t.status)}</td><td class="small">${UI.esc(t.assignee_name || '—')}</td><td class="small nowrap" title="${UI.fmtDateTime(t.opened_at)}">${UI.relative(t.opened_at)}</td><td class="small nowrap">${t.follow_up_at ? `<span class="badge ${new Date(t.follow_up_at) < Date.now() ? 'danger' : 'warning'}">${UI.fmtDateTime(t.follow_up_at)}</span>` : ''}</td>
-        <td>${t.status === 'aguardando' && (!t.assignee_id || t.assignee_id === CRM.user.id) ? `<button class="btn sm success" data-claim="${t.id}">Assumir</button>` : ''}</td></tr>`,
-        )
-        .join('')}</tbody></table></div><div class="pagination muted">${r.total} atendimento(s)</div>`;
+        .map((t) => {
+          const late = this.isLate(t);
+          return `<tr class="clickable ${late ? 'row-late' : ''}" data-id="${t.id}"><td class="mono small">${UI.esc(t.protocol)}</td>
+          <td><div class="cell-person"><span class="avatar sm">${UI.esc(UI.initials(t.customer_name))}</span><span><strong>${UI.esc(t.customer_name)}</strong><span class="muted small">${UI.esc(t.customer_phone || '')}</span></span></div></td>
+          <td>${UI.esc(t.subject)}<div class="small muted">${UI.esc(t.channel)}${late ? ` <span class="badge danger" title="${UI.attr(late)}">Atrasado</span>` : ''}</div></td><td>${UI.priorityBadge(t.priority)}</td><td>${UI.statusBadge(t.status)}</td>
+          <td class="small">${UI.esc(t.assignee_name || '—')}</td>
+          <td class="small nowrap" title="Aberto em ${UI.attr(UI.fmtDateTime(t.opened_at))}">${this.elapsed(t)}</td>
+          <td class="small">${t.follow_up_at ? `<span class="badge ${new Date(t.follow_up_at) < Date.now() ? 'danger' : 'warning'}">${UI.fmtDateTime(t.follow_up_at)}</span>` : ''}</td>
+          <td>${t.status === 'aguardando' && (!t.assignee_id || t.assignee_id === CRM.user.id) ? `<button class="btn sm success" data-claim="${t.id}">Assumir</button>` : ''}</td></tr>`;
+        })
+        .join('')}</tbody></table></div>${this.pagination(r)}`;
+    box.querySelectorAll('[data-page]').forEach(
+      (b) =>
+        (b.onclick = () => {
+          this.page = Number(b.dataset.page);
+          this.list();
+        }),
+    );
     box.querySelectorAll('tr[data-id]').forEach(
       (tr) =>
         (tr.onclick = (e) => {
@@ -114,6 +138,28 @@ CRM.pages.tickets = {
     box
       .querySelectorAll('[data-claim]')
       .forEach((b) => (b.onclick = () => this.claim(Number(b.dataset.claim), () => this.list())));
+  },
+
+  // Atrasado: retorno agendado vencido, ou aguardando há mais de 24h sem nenhuma resposta
+  isLate(t) {
+    if (['resolvido', 'cancelado'].includes(t.status)) return '';
+    if (t.follow_up_at && new Date(t.follow_up_at) < Date.now()) return 'Retorno agendado vencido';
+    if (!t.first_response_at && Date.now() - new Date(t.opened_at) > 24 * 3600 * 1000)
+      return 'Mais de 24h sem primeira resposta';
+    return '';
+  },
+
+  // Tempo em aberto (ou duração total, se já encerrado)
+  elapsed(t) {
+    const end = t.closed_at ? new Date(t.closed_at) : new Date();
+    const secs = Math.max(0, (end - new Date(t.opened_at)) / 1000);
+    return `${t.closed_at ? '' : 'há '}${UI.fmtDuration(secs)}`;
+  },
+
+  pagination(r) {
+    const pages = Math.ceil(r.total / r.limit);
+    if (pages <= 1) return `<div class="pagination muted">${r.total} atendimento(s)</div>`;
+    return `<div class="pagination"><span class="muted">${r.total} atendimento(s) · página ${r.page} de ${pages}</span><button class="btn secondary sm" data-page="${r.page - 1}" ${r.page <= 1 ? 'disabled' : ''}>Anterior</button><button class="btn secondary sm" data-page="${r.page + 1}" ${r.page >= pages ? 'disabled' : ''}>Próxima</button></div>`;
   },
 
   async claim(id, after) {
