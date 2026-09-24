@@ -73,7 +73,9 @@ CRM.pages.pipeline = {
       <p class="muted small">Oportunidades ganhas ou perdidas há mais de 30 dias ficam ocultas do quadro, mas continuam nos relatórios e na exportação.</p>`;
     box.querySelectorAll('.kb-card').forEach((card) => {
       card.onclick = () => this.detail(Number(card.dataset.id));
+      card.ondragend = () => card.classList.remove('dragging');
       card.ondragstart = (e) => {
+        card.classList.add('dragging');
         e.dataTransfer.setData('text/plain', JSON.stringify({ id: card.dataset.id, version: card.dataset.version }));
       };
     });
