@@ -3,6 +3,7 @@ const express = require('express');
 const { query } = require('../db');
 const { requireAuth, isManager } = require('../middleware/auth');
 const { toCsv } = require('../lib/util');
+const { requireModule } = require('../lib/permissions');
 const { startOfDaySql, endOfDaySql, isDateString, localDate, todaySql } = require('../lib/timezone');
 const { STATUS_LABEL } = require('./tickets');
 
@@ -47,6 +48,11 @@ function buildFilters(req) {
   if (q.status) {
     p.push(q.status);
     f.ticket.push(`t.status = $${p.length}`);
+  }
+  if (q.customer) {
+    p.push(`%${String(q.customer).trim()}%`);
+    f.ticket.push(`c.name ILIKE $${p.length}`);
+    f.opp.push(`c.name ILIKE $${p.length}`);
   }
   if (from) {
     p.push(from);
@@ -166,8 +172,38 @@ router.get('/summary', async (req, res, next) => {
       taskWhere += ` AND assignee_id = $1`;
     }
     const overdue = (await run(`SELECT count(*)::int AS n FROM tasks WHERE ${taskWhere}`, taskParams)).rows[0].n;
+    // Série diária (até 92 dias) de atendimentos abertos e resolvidos, no fuso da empresa
+    let daily = [];
+    if (f.fromIdx && f.toIdx && (new Date(f.to) - new Date(f.from)) / 86400000 <= 92) {
+      daily = (
+        await run(
+          `SELECT d::date AS day,
+             (SELECT count(*) ${tBase} WHERE ${and(f.ticket)} AND ${localDate('t.opened_at')} = d::date)::int AS opened,
+             (SELECT count(*) ${tBase} WHERE ${and(f.ticket)} AND t.status = 'resolvido' AND ${localDate('t.closed_at')} = d::date)::int AS resolved
+           FROM generate_series($${f.fromIdx}::date, $${f.toIdx}::date, interval '1 day') d ORDER BY d`,
+          p,
+        )
+      ).rows.map((r) => ({ ...r, day: r.day.toISOString().slice(0, 10) }));
+    }
+    const period = (col) => and(periodSql(col, f));
+    // Tarefas concluídas e clientes cadastrados no período (o atendente vê só os dele)
+    const who = assignee ? Number(assignee) : null;
+    const tasksDone = (
+      await run(
+        `SELECT count(*)::int AS n FROM tasks WHERE done_at IS NOT NULL AND ${period('done_at')}${who ? ` AND assignee_id = ${who}` : ''}`,
+        p,
+      )
+    ).rows[0].n;
+    const customersCreated = (
+      await run(
+        `SELECT count(*)::int AS n FROM customers WHERE ${period('created_at')}${who ? ` AND owner_id = ${who}` : ''}`,
+        p,
+      )
+    ).rows[0].n;
     const decided = oppsClosed.won + oppsClosed.lost;
     res.json({
+      daily,
+      totals: { tasks_done: tasksDone, customers_created: customersCreated },
       period: { from: f.from, to: f.to },
       tickets: {
         ...tickets,
@@ -323,7 +359,7 @@ router.get('/dashboard', async (req, res, next) => {
   }
 });
 
-router.get('/export.csv', async (req, res, next) => {
+router.get('/export.csv', requireModule('reports'), async (req, res, next) => {
   try {
     const { p, f } = buildFilters(req);
     const tBase = `FROM tickets t JOIN customers c ON c.id = t.customer_id LEFT JOIN users u ON u.id = t.assignee_id`;

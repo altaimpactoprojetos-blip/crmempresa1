@@ -111,7 +111,9 @@ test('limites do plano: usuários, canais e recursos', async () => {
   assert.equal((await admin.put('/chatbot', { enabled: false, config: bot.config })).status, 200);
   // Uso aparece na tela de assinatura
   const b = (await admin.get('/billing')).data;
-  assert.deepEqual(b.usage, { users: 3, channels: 1 });
+  assert.equal(b.usage.users, 3);
+  assert.equal(b.usage.channels, 1);
+  assert.equal(typeof b.usage.customers, 'number');
   assert.equal(b.company.plan, 'basico');
   assert.ok(b.plans.some((p) => p.id === 'profissional'));
   assert.ok(!b.plans.some((p) => p.id === 'interno'));
@@ -170,7 +172,7 @@ test('assinar: cria cliente e assinatura no Asaas e devolve o link de pagamento'
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.invoice_url, 'https://asaas.test/i/pay_1');
   const sub = calls.find((c) => c.method === 'POST' && c.path === '/subscriptions').body;
-  assert.equal(sub.value, 197);
+  assert.equal(sub.value, 49.9); // plano Profissional por R$ 49,90 (migração 009)
   assert.equal(sub.cycle, 'MONTHLY');
   assert.equal(sub.customer, 'cus_1');
   assert.equal(calls.find((c) => c.path === '/customers').body.cpfCnpj, '11144477735');
@@ -243,7 +245,7 @@ test('painel da plataforma: login próprio, visão geral, suspender e prorrogar 
   assert.equal(login.status, 200);
   const ov = (await owner.get('/platform/overview')).data;
   assert.equal(ov.active, 2);
-  assert.equal(ov.mrr_cents, 19700); // profissional + interno (R$ 0)
+  assert.equal(ov.mrr_cents, 4990); // profissional + interno (R$ 0)
   assert.equal(ov.received_month_cents >= 0, true);
   const list = (await owner.get('/platform/companies', undefined)).data.companies;
   assert.equal(list.length, 2);

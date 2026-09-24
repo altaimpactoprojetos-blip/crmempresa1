@@ -2,6 +2,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { query, tx } = require('../db');
+const { requireModule } = require('../lib/permissions');
 const { validate } = require('../middleware/validate');
 const customFields = require('../lib/customFields');
 const { requireAuth, isManager } = require('../middleware/auth');
@@ -144,7 +145,7 @@ router.get('/', async (req, res, next) => {
 });
 
 // Exportação CSV respeitando o escopo do usuário
-router.get('/export.csv', async (req, res, next) => {
+router.get('/export.csv', requireModule('customers'), async (req, res, next) => {
   try {
     const params = [];
     const scope = scopeSql(req.user, 'c', params);

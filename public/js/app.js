@@ -15,6 +15,13 @@ Object.assign(CRM, {
   isAdmin() {
     return this.user && this.user.role === 'admin';
   },
+  // Módulos liberados para o perfil (Configurações › Permissões); o administrador vê tudo
+  MODULES: ['dashboard', 'inbox', 'customers', 'tickets', 'pipeline', 'tasks', 'reports'],
+  can(module) {
+    if (!this.user || this.user.role === 'admin' || !this.MODULES.includes(module)) return true;
+    const perms = ((this.company && this.company.permissions) || {})[this.user.role] || {};
+    return perms[module] !== false;
+  },
 });
 
 const root = document.getElementById('root');
@@ -150,7 +157,7 @@ const NAV = [
   ['#/assinatura', 'Assinatura', 'money', 'admin'],
 ];
 const navHtml = () =>
-  NAV.filter(([, , , only]) => only !== 'admin' || CRM.isAdmin())
+  NAV.filter(([, , i, only]) => (only !== 'admin' || CRM.isAdmin()) && CRM.can(i))
     .map(([h, l, i]) =>
       l
         ? `<a href="${h}" data-nav="${h}" data-tip="${l}">${UI.icons[i]}<span class="nav-label">${l}</span><span class="badge" data-nav-badge="${h}" hidden></span></a>`
@@ -478,6 +485,10 @@ async function route() {
   const content = root.querySelector('#content');
   if (!key || !CRM.pages[key]) {
     content.innerHTML = UI.empty('Página não encontrada', 'Use o menu lateral para navegar.');
+    return;
+  }
+  if (!CRM.can(key)) {
+    content.innerHTML = `<div class="card">${UI.empty('Sem acesso a esta área', 'O administrador da sua empresa não liberou este módulo para o seu perfil.')}</div>`;
     return;
   }
   CRM.currentPage = CRM.pages[key];

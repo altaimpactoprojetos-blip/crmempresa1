@@ -126,6 +126,7 @@ router.get('/me', requireAuth, (req, res) => {
       trial_ends_at: req.user.trial_ends_at,
       current_period_end: req.user.current_period_end,
       billing_block: req.user.billing_block,
+      permissions: req.user.permissions || {},
     },
   });
 });

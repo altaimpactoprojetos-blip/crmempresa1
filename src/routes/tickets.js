@@ -2,6 +2,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { query, tx } = require('../db');
+const { requireModule } = require('../lib/permissions');
 const { validate } = require('../middleware/validate');
 const { requireAuth, isManager, requireRole } = require('../middleware/auth');
 const { badRequest, notFound, conflict, forbidden } = require('../lib/errors');
@@ -154,7 +155,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.get('/export.csv', async (req, res, next) => {
+router.get('/export.csv', requireModule('tickets'), async (req, res, next) => {
   try {
     const params = [];
     const where = [scopeSql(req.user, params)];

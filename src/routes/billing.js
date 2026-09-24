@@ -37,7 +37,13 @@ router.get('/', async (req, res, next) => {
         block_text: reason ? REASON_TEXT[reason] : null,
       },
       plans: plans.rows,
-      usage: used,
+      usage: {
+        ...used,
+        ...(
+          await query(`SELECT (SELECT count(*)::int FROM customers) AS customers,
+            (SELECT count(*)::int FROM tickets WHERE opened_at >= date_trunc('month', now())) AS tickets_month`)
+        ).rows[0],
+      },
       billing_enabled: config.billing.enabled,
       grace_days: config.billing.graceDays,
     };
@@ -45,6 +51,11 @@ router.get('/', async (req, res, next) => {
       out.company.billing_email = c.billing_email || req.user.email;
       out.company.billing_document = c.billing_document;
       out.payments = (await query('SELECT * FROM payments ORDER BY due_date DESC NULLS LAST, id DESC LIMIT 24')).rows;
+      // Próxima cobrança em aberto e a forma de pagamento usada por último
+      const pending = out.payments.filter((p) => ['PENDING', 'OVERDUE'].includes(p.status));
+      out.next_payment = pending.length ? pending[pending.length - 1] : null;
+      out.last_billing_type =
+        (out.payments.find((p) => p.billing_type && p.billing_type !== 'UNDEFINED') || {}).billing_type || null;
     }
     res.json(out);
   } catch (err) {

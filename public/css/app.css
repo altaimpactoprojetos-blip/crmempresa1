@@ -2795,3 +2795,171 @@ a.side-item:hover {
 .task-board {
   grid-auto-columns: minmax(210px, 1fr);
 }
+
+/* ---------- Gráfico de atendimentos por dia ---------- */
+.chart-wrap {
+  position: relative;
+}
+.chart-wrap svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.chart-wrap .s1,
+.legend .s1 {
+  fill: #2563eb;
+  background: #2563eb;
+}
+.chart-wrap .s2,
+.legend .s2 {
+  fill: #d97706;
+  background: #d97706;
+}
+.chart-wrap .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart-wrap .hit {
+  fill: transparent;
+}
+.chart-wrap .day:hover .hit {
+  fill: rgba(15, 23, 42, 0.04);
+}
+.chart-wrap .xl,
+.chart-wrap .yl {
+  font-size: 11px;
+  fill: var(--muted);
+}
+.chart-wrap .xl {
+  text-anchor: middle;
+}
+.chart-wrap .yl {
+  text-anchor: end;
+}
+.legend {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.legend span,
+.chart-tip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.legend i,
+.chart-tip i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+.chart-tip {
+  position: absolute;
+  pointer-events: none;
+  background: #0f172a;
+  color: #fff;
+  font-size: 0.78rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 130px;
+  box-shadow: var(--shadow-lg);
+}
+.chart-tip[hidden] {
+  display: none;
+}
+.chart-tip .s1 {
+  background: #2563eb;
+}
+.chart-tip .s2 {
+  background: #d97706;
+}
+.plan-hero h2 {
+  margin: 0.4rem 0 0.1rem;
+}
+.upper {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 650;
+}
+.plan-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+.plan-facts > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- Permissões: chave liga/desliga ---------- */
+.perm-table td,
+.perm-table th {
+  vertical-align: middle;
+}
+.perm-on {
+  color: #16a34a;
+  font-weight: 700;
+}
+.perm-off {
+  color: #94a3b8;
+  font-weight: 700;
+}
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  cursor: pointer;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch span {
+  position: absolute;
+  inset: 0;
+  background: #cbd5e1;
+  border-radius: 99px;
+  transition: background-color 0.15s ease;
+}
+.switch span::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 3px;
+  top: 3px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease;
+}
+.switch input:checked + span {
+  background: var(--primary);
+}
+.switch input:checked + span::before {
+  transform: translateX(16px);
+}
+.switch input:focus-visible + span {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+@media (max-width: 800px) {
+  /* No celular, os primeiros passos mostram só o que falta */
+  .onb-step.done,
+  .onb-step .small {
+    display: none;
+  }
+}

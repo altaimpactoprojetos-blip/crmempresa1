@@ -2,6 +2,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { query, tx } = require('../db');
+const { requireModule } = require('../lib/permissions');
 const { validate } = require('../middleware/validate');
 const { requireAuth, isManager } = require('../middleware/auth');
 const { badRequest, notFound, conflict, forbidden } = require('../lib/errors');
@@ -64,7 +65,7 @@ const schema = z.object({
   version: z.number().int().optional(),
 });
 
-router.get('/', async (req, res, next) => {
+router.get('/', requireModule('pipeline'), async (req, res, next) => {
   try {
     const params = [];
     const where = [scopeSql(req.user, params)];
@@ -112,7 +113,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.get('/export.csv', async (req, res, next) => {
+router.get('/export.csv', requireModule('pipeline'), async (req, res, next) => {
   try {
     const params = [];
     const { rows } = await query(`${SELECT} WHERE ${scopeSql(req.user, params)} ORDER BY o.created_at DESC`, params);
