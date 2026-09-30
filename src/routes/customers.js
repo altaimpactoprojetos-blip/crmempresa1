@@ -2,6 +2,7 @@
 const express = require('express');
 const { z } = require('zod');
 const { query, tx } = require('../db');
+const { requireModule } = require('../lib/permissions');
 const { validate } = require('../middleware/validate');
 const customFields = require('../lib/customFields');
 const { requireAuth, isManager } = require('../middleware/auth');
@@ -74,6 +75,18 @@ async function findDuplicates(phoneDigits, email, excludeId) {
 }
 
 // GET /api/customers?q=&source=&owner_id=&tag=&page=&limit=&pending_followup=
+// Último contato: mensagem na caixa de entrada ou interação/abertura de atendimento, o que for mais recente
+const LAST_CONTACT = `GREATEST(
+  (SELECT max(cv.last_message_at) FROM conversations cv WHERE cv.customer_id = c.id),
+  (SELECT max(t.opened_at) FROM tickets t WHERE t.customer_id = c.id),
+  (SELECT max(e.created_at) FROM ticket_events e JOIN tickets t ON t.id = e.ticket_id WHERE t.customer_id = c.id AND e.kind = 'interaction'))`;
+const SORTS = {
+  recent: 'c.updated_at DESC',
+  name: 'lower(c.name) ASC',
+  created: 'c.created_at DESC',
+  last_contact: 'last_contact_at DESC NULLS LAST',
+};
+
 router.get('/', async (req, res, next) => {
   try {
     const params = [];
@@ -120,8 +133,9 @@ router.get('/', async (req, res, next) => {
     const { rows } = await query(
       `SELECT c.id, c.name, c.phone, c.email, c.company, c.city, c.source, c.tags, c.owner_id, u.name AS owner_name, c.created_at, c.updated_at,
         (SELECT count(*)::int FROM tickets t WHERE t.customer_id = c.id AND t.status NOT IN ('resolvido','cancelado')) AS open_tickets,
-        (SELECT min(t.follow_up_at) FROM tickets t WHERE t.customer_id = c.id AND t.follow_up_at IS NOT NULL AND t.status NOT IN ('resolvido','cancelado')) AS next_follow_up
-       ${sql} ORDER BY c.updated_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+        (SELECT min(t.follow_up_at) FROM tickets t WHERE t.customer_id = c.id AND t.follow_up_at IS NOT NULL AND t.status NOT IN ('resolvido','cancelado')) AS next_follow_up,
+        ${LAST_CONTACT} AS last_contact_at
+       ${sql} ORDER BY ${SORTS[req.query.sort] || SORTS.recent} LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
     res.json({ customers: rows, total, page, limit });
@@ -131,7 +145,7 @@ router.get('/', async (req, res, next) => {
 });
 
 // Exportação CSV respeitando o escopo do usuário
-router.get('/export.csv', async (req, res, next) => {
+router.get('/export.csv', requireModule('customers'), async (req, res, next) => {
   try {
     const params = [];
     const scope = scopeSql(req.user, 'c', params);
@@ -332,7 +346,7 @@ router.post('/import', validate(importSchema), async (req, res, next) => {
 router.get('/:id', async (req, res, next) => {
   try {
     const c = await loadCustomer(req, Number(req.params.id));
-    const [tickets, opps, tasks, notes, wa] = await Promise.all([
+    const [tickets, opps, tasks, notes, wa, oppEvents] = await Promise.all([
       query(
         `SELECT t.id, t.protocol, t.subject, t.status, t.priority, t.channel, t.assignee_id, u.name AS assignee_name, t.opened_at, t.closed_at, t.follow_up_at
              FROM tickets t LEFT JOIN users u ON u.id = t.assignee_id WHERE t.customer_id = $1 ORDER BY t.opened_at DESC`,
@@ -356,6 +370,12 @@ router.get('/:id', async (req, res, next) => {
          WHERE customer_id = $1 ORDER BY last_message_at DESC NULLS LAST`,
         [c.id],
       ),
+      // Histórico das oportunidades (criação e mudanças de etapa) para a linha do tempo do cliente
+      query(
+        `SELECT e.body, e.created_at, o.id AS opportunity_id, o.title FROM opportunity_events e
+         JOIN opportunities o ON o.id = e.opportunity_id WHERE o.customer_id = $1 ORDER BY e.created_at DESC LIMIT 40`,
+        [c.id],
+      ),
     ]);
     const duplicates = await findDuplicates(c.phone_digits, c.email ? c.email.toLowerCase() : null, c.id);
     res.json({
@@ -365,6 +385,7 @@ router.get('/:id', async (req, res, next) => {
       tasks: tasks.rows,
       notes: notes.rows,
       conversations: wa.rows,
+      opportunity_events: oppEvents.rows,
       duplicates,
     });
   } catch (err) {

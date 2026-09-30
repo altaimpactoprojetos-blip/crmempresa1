@@ -2,6 +2,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { billingGate } = require('../lib/subscription');
+const { requireModule } = require('../lib/permissions');
 
 // Registro central de todas as rotas da API (montado em /api).
 const api = express.Router();
@@ -34,7 +35,8 @@ api.use('/automations', require('./automations'));
 api.use('/tasks', require('./tasks'));
 api.use('/reports', require('./reports'));
 api.use('/notifications', require('./notifications'));
-api.use('/inbox', require('./inbox'));
+// Conversas: o módulo inteiro respeita a permissão do perfil
+api.use('/inbox', requireModule('inbox'), require('./inbox'));
 api.use('/channels', require('./channels'));
 api.use('/quick-replies', require('./quickReplies'));
 api.use('/chatbot', require('./chatbot'));

@@ -15,6 +15,13 @@ Object.assign(CRM, {
   isAdmin() {
     return this.user && this.user.role === 'admin';
   },
+  // Módulos liberados para o perfil (Configurações › Permissões); o administrador vê tudo
+  MODULES: ['dashboard', 'inbox', 'customers', 'tickets', 'pipeline', 'tasks', 'reports'],
+  can(module) {
+    if (!this.user || this.user.role === 'admin' || !this.MODULES.includes(module)) return true;
+    const perms = ((this.company && this.company.permissions) || {})[this.user.role] || {};
+    return perms[module] !== false;
+  },
 });
 
 const root = document.getElementById('root');
@@ -150,10 +157,10 @@ const NAV = [
   ['#/assinatura', 'Assinatura', 'money', 'admin'],
 ];
 const navHtml = () =>
-  NAV.filter(([, , , only]) => only !== 'admin' || CRM.isAdmin())
+  NAV.filter(([, , i, only]) => (only !== 'admin' || CRM.isAdmin()) && CRM.can(i))
     .map(([h, l, i]) =>
       l
-        ? `<a href="${h}" data-nav="${h}">${UI.icons[i]}<span>${l}</span><span class="badge" data-nav-badge="${h}" hidden></span></a>`
+        ? `<a href="${h}" data-nav="${h}" data-tip="${l}">${UI.icons[i]}<span class="nav-label">${l}</span><span class="badge" data-nav-badge="${h}" hidden></span></a>`
         : `<div class="nav-section">${h}</div>`,
     )
     .join('');
@@ -192,26 +199,48 @@ CRM.onBillingBlocked = (data) => {
   }
 };
 
+// Menu lateral recolhido (só ícones) é uma preferência deste navegador
+const collapsedPref = {
+  get() {
+    try {
+      return localStorage.getItem('crm.sidebar') === 'compact';
+    } catch (_) {
+      return false;
+    }
+  },
+  set(v) {
+    try {
+      localStorage.setItem('crm.sidebar', v ? 'compact' : 'full');
+    } catch (_) {
+      /* navegador sem armazenamento: vale só nesta página */
+    }
+  },
+};
+
 function renderShell() {
   const u = CRM.user;
-  root.innerHTML = `<div id="app">
+  root.innerHTML = `<div id="app" class="${collapsedPref.get() ? 'collapsed' : ''}">
     <aside class="sidebar" id="sidebar">${brandHtml()}
       <nav class="nav" id="nav">${navHtml()}</nav>
       ${planChipHtml() ? `<div class="sidebar-footer">${planChipHtml()}</div>` : ''}
+      <button class="collapse-btn" id="collapseBtn" title="Recolher ou expandir o menu">${UI.icons.collapse}<span class="nav-label">Recolher menu</span></button>
     </aside>
     <div class="main">
       ${CRM.settings.demo_mode ? '<div class="demo-banner">Modo de demonstração — os dados exibidos são fictícios. Desative em Configurações › Empresa.</div>' : ''}
       <header class="topbar">
         <button class="icon-btn menu-toggle" id="menuToggle" aria-label="Menu">${UI.icons.menu}</button>
-        <div class="search">${UI.icons.search}<input id="globalSearch" placeholder="Buscar cliente, protocolo, telefone..." autocomplete="off"><span class="kbd">/</span><div class="search-results" id="searchResults" hidden></div></div>
+        <div class="search">${UI.icons.search}<input id="globalSearch" placeholder="Buscar cliente, protocolo, telefone, tarefa..." autocomplete="off"><span class="kbd">/</span><div class="search-results" id="searchResults" hidden></div></div>
         <div class="grow"></div>
         ${u.role === 'atendente' ? `<label class="avail-toggle" title="Disponível para receber atendimentos na distribuição automática"><span class="dot ${u.available ? 'on' : 'off'}" id="availDot"></span><input type="checkbox" id="availToggle" ${u.available ? 'checked' : ''}><span class="label">Disponível</span></label>` : ''}
-        <button class="icon-btn notif-btn" id="notifBtn" aria-label="Notificações">${UI.icons.bell}<span class="count" id="notifCount" hidden></span></button>
-        <div class="user-menu"><button class="user-btn" id="userBtn" aria-haspopup="true"><span class="avatar">${UI.esc(UI.initials(u.name))}</span><span class="who"><strong>${UI.esc(u.name)}</strong><span>${UI.ROLE[u.role]}</span></span></button>
+        <button class="icon-btn" id="helpBtn" aria-label="Ajuda" title="Ajuda e atalhos">${UI.icons.help}</button>
+        <button class="icon-btn notif-btn" id="notifBtn" aria-label="Notificações" title="Notificações">${UI.icons.bell}<span class="count" id="notifCount" hidden></span></button>
+        <div class="user-menu"><button class="user-btn" id="userBtn" aria-haspopup="true"><span class="avatar">${UI.esc(UI.initials(u.name))}</span><span class="who"><strong>${UI.esc(u.name)}</strong><span>${UI.ROLE[u.role]} · ${UI.esc(CRM.settings.name || '')}</span></span></button>
           <div class="dropdown" id="userMenu" hidden>
-            <div class="small muted" style="padding:0.4rem 0.7rem">${UI.esc(u.email)}</div><hr>
+            <div class="dropdown-head"><strong>${UI.esc(u.name)}</strong><span>${UI.esc(u.email)}</span><span class="badge">${UI.ROLE[u.role]}</span></div>
+            <div class="dropdown-company">${UI.icons.building}<span>${UI.esc(CRM.settings.name || '')}</span></div><hr>
             <a href="#/perfil">${UI.icons.user}Meu perfil</a>
-            ${CRM.isAdmin() ? `<a href="#/configuracoes">${UI.icons.settings}Configurações</a>` : ''}
+            ${CRM.isAdmin() ? `<a href="#/configuracoes">${UI.icons.settings}Configurações</a><a href="#/assinatura">${UI.icons.money}Assinatura</a>` : ''}
+            <button id="helpItem">${UI.icons.help}Ajuda e atalhos</button>
             <hr><button id="logout">${UI.icons.logout}Sair</button>
           </div></div>
       </header>
@@ -250,6 +279,13 @@ function renderShell() {
       }
     };
   root.querySelector('#notifBtn').onclick = toggleNotifications;
+  root.querySelector('#helpBtn').onclick = showHelp;
+  root.querySelector('#helpItem').onclick = showHelp;
+  root.querySelector('#collapseBtn').onclick = () => {
+    const app = root.querySelector('#app');
+    app.classList.toggle('collapsed');
+    collapsedPref.set(app.classList.contains('collapsed'));
+  };
   setupSearch();
   refreshBadges();
   connectRealtime();
@@ -364,13 +400,16 @@ function setupSearch() {
       return;
     }
     try {
-      const [c, t] = await Promise.all([
+      const [c, t, k] = await Promise.all([
         api('/customers', { query: { q, limit: 6 } }),
         api('/tickets', { query: { q, limit: 6 } }),
+        api('/tasks', { query: { q, view: 'open' } }).catch(() => ({ tasks: [] })),
       ]);
+      const tasks = k.tasks.slice(0, 5);
       box.innerHTML = `${c.customers.length ? '<div class="cat">Clientes</div>' + c.customers.map((x) => `<a href="#/clientes/${x.id}"><strong>${UI.esc(x.name)}</strong> <span class="muted small">${UI.esc(x.phone || '')} ${UI.esc(x.company || '')}</span></a>`).join('') : ''}
         ${t.tickets.length ? '<div class="cat">Atendimentos</div>' + t.tickets.map((x) => `<a href="#/atendimentos/${x.id}"><span class="mono">${UI.esc(x.protocol)}</span> ${UI.esc(x.subject)} <span class="muted small">— ${UI.esc(x.customer_name)}</span></a>`).join('') : ''}
-        ${!c.customers.length && !t.tickets.length ? '<div class="cat">Nenhum resultado</div>' : ''}`;
+        ${tasks.length ? '<div class="cat">Tarefas</div>' + tasks.map((x) => `<a href="#/tarefas?q=${encodeURIComponent(x.title)}">${UI.esc(x.title)} <span class="muted small">${x.due_at ? '— ' + UI.fmtDateTime(x.due_at) : ''}</span></a>`).join('') : ''}
+        ${!c.customers.length && !t.tickets.length && !tasks.length ? '<div class="cat">Nenhum resultado</div>' : ''}`;
       box.hidden = false;
     } catch (_) {
       box.hidden = true;
@@ -448,8 +487,12 @@ async function route() {
     content.innerHTML = UI.empty('Página não encontrada', 'Use o menu lateral para navegar.');
     return;
   }
+  if (!CRM.can(key)) {
+    content.innerHTML = `<div class="card">${UI.empty('Sem acesso a esta área', 'O administrador da sua empresa não liberou este módulo para o seu perfil.')}</div>`;
+    return;
+  }
   CRM.currentPage = CRM.pages[key];
-  content.innerHTML = '<p class="muted">Carregando...</p>';
+  content.innerHTML = UI.skeleton();
   try {
     await CRM.pages[key].render(content, { id: parts[1] ? Number(parts[1]) : null, sub: parts[1], query });
   } catch (err) {
@@ -474,6 +517,26 @@ CRM.loadUsers = async () => {
   CRM.users = (await api('/users')).users;
   return CRM.users;
 };
+// Ajuda rápida: atalhos e onde fica cada coisa
+function showHelp() {
+  const item = (t, d) => `<li><strong>${t}</strong><span>${d}</span></li>`;
+  UI.modal({
+    title: 'Ajuda',
+    body: `<div class="help-grid"><div><h4>Atalhos</h4><ul class="help-list">
+        ${item('<span class="kbd">/</span>', 'Busca global (clientes, protocolos, telefones e tarefas)')}
+        ${item('<span class="kbd">Esc</span>', 'Fecha janelas e a busca')}
+        ${item('<span class="kbd">Enter</span> na busca', 'Abre a lista de clientes filtrada')}</ul></div>
+      <div><h4>Onde fica cada coisa</h4><ul class="help-list">
+        ${item('Conversas', 'WhatsApp, Instagram e Messenger num só lugar')}
+        ${item('Atendimentos', 'Chamados com protocolo, prioridade e fila')}
+        ${item('Funil', 'Oportunidades de venda; arraste os cartões entre as etapas')}
+        ${item('Tarefas', 'Retornos e lembretes em lista, quadro ou calendário')}
+        ${CRM.isAdmin() ? item('Configurações', 'Empresa, equipe, permissões, funis, canais e robô') : ''}</ul></div></div>
+      <p class="small muted mt">Primeira vez por aqui? O Dashboard mostra um passo a passo para começar.</p>`,
+    footer: '<button class="btn" data-close>Entendi</button>',
+  });
+}
+
 CRM.pageHeader = (title, subtitle, actions = '') =>
   `<div class="page-header"><div><h1>${UI.esc(title)}</h1>${subtitle ? `<p>${UI.esc(subtitle)}</p>` : ''}</div><div class="flex wrap">${actions}</div></div>`;
 

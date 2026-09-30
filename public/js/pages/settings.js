@@ -7,16 +7,18 @@ CRM.pages.settings = {
     const tabs = [
       ['empresa', 'Empresa'],
       ['usuarios', 'Usuários'],
+      ['permissoes', 'Permissões'],
       ['funil', 'Funis'],
       ['campos', 'Campos personalizados'],
       ['automacoes', 'Automações'],
       ['whatsapp', 'WhatsApp e redes'],
       ['robo', 'Robô de atendimento'],
       ['respostas', 'Respostas rápidas'],
-      ['canais', 'Canais e origens'],
+      ['canais', 'Atendimento'],
       ['integracoes', 'Integrações'],
       ['backup', 'Backup'],
       ['auditoria', 'Auditoria'],
+      ['assinatura', 'Assinatura'],
     ];
     const visible = CRM.isAdmin()
       ? tabs
@@ -739,6 +741,47 @@ CRM.pages.settings = {
       } catch (err) {
         UI.showErrors(form, err);
         if (!err.data?.fields) UI.err(err);
+      }
+    };
+  },
+
+  // Atalho: a assinatura tem página própria
+  assinatura() {
+    location.hash = '#/assinatura';
+  },
+
+  // ---------- Permissões por perfil ----------
+  async permissoes(box) {
+    const { modules, permissions } = await api('/settings/permissions');
+    const roles = [
+      ['supervisor', 'Gestor'],
+      ['atendente', 'Atendente'],
+    ];
+    const allowed = (role, m) => (permissions[role] || {})[m] !== false;
+    box.innerHTML = `<div class="card"><h3>Acesso por perfil</h3>
+      <p class="muted small">Escolha o que cada perfil vê no menu. O <strong>Administrador</strong> sempre tem acesso a tudo, inclusive às Configurações. Atendentes continuam vendo apenas os próprios clientes, atendimentos e tarefas, como antes.</p>
+      <form id="permForm"><div class="table-wrap"><table class="perm-table"><thead><tr><th>Módulo</th><th class="center">Administrador</th>${roles.map(([, l]) => `<th class="center">${l}</th>`).join('')}</tr></thead><tbody>
+      ${Object.entries(modules)
+        .map(
+          ([k, label]) =>
+            `<tr><td>${UI.esc(label)}</td><td class="center"><span class="perm-on" title="Sempre liberado">✓</span></td>${roles
+              .map(
+                ([r]) =>
+                  `<td class="center"><label class="switch"><input type="checkbox" data-role="${r}" data-module="${k}" ${allowed(r, k) ? 'checked' : ''}><span></span></label></td>`,
+              )
+              .join('')}</tr>`,
+        )
+        .join('')}
+      <tr><td>Configurações</td><td class="center"><span class="perm-on">✓</span></td>${roles.map(() => '<td class="center"><span class="perm-off" title="Só administradores alteram configurações">✕</span></td>').join('')}</tr>
+      </tbody></table></div><div class="right mt"><button class="btn">Salvar permissões</button></div></form></div>`;
+    box.querySelector('#permForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const body = { supervisor: {}, atendente: {} };
+      box.querySelectorAll('[data-role]').forEach((c) => (body[c.dataset.role][c.dataset.module] = c.checked));
+      try {
+        UI.ok((await api('/settings/permissions', { method: 'PUT', body })).message);
+      } catch (err) {
+        UI.err(err);
       }
     };
   },

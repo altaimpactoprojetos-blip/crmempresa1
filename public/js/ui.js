@@ -78,7 +78,7 @@ UI.PRIORITY = {
   alta: { label: 'Alta', cls: 'warning' },
   urgente: { label: 'Urgente', cls: 'danger' },
 };
-UI.ROLE = { admin: 'Administrador', supervisor: 'Supervisor', atendente: 'Atendente' };
+UI.ROLE = { admin: 'Administrador', supervisor: 'Gestor', atendente: 'Atendente' };
 UI.statusBadge = (s) => {
   const m = UI.STATUS[s] || { label: s, cls: '' };
   return `<span class="badge ${m.cls}">${UI.esc(m.label)}</span>`;
@@ -99,6 +99,16 @@ UI.ok = (m) => UI.toast(m, 'success');
 UI.err = (e) => UI.toast(e instanceof Error ? e.message : String(e), 'error', 6000);
 
 UI.empty = (title, text) => `<div class="empty"><strong>${UI.esc(title)}</strong>${text ? UI.esc(text) : ''}</div>`;
+
+// Esqueleto de carregamento (no lugar de "Carregando...")
+UI.skeleton = (kind = 'page') => {
+  const line = (w) => `<div class="sk sk-line" style="width:${w}"></div>`;
+  if (kind === 'rows')
+    return `<div class="sk-rows">${Array.from({ length: 6 }, () => `<div class="sk-row">${line('30%')}${line('20%')}${line('15%')}</div>`).join('')}</div>`;
+  return `<div class="sk-page" aria-busy="true" aria-label="Carregando">${line('220px')}${line('340px')}
+    <div class="grid cols-4 mt">${Array.from({ length: 4 }, () => '<div class="sk sk-card"></div>').join('')}</div>
+    <div class="sk sk-block mt"></div></div>`;
+};
 
 // Modal genérico. Retorna { el, close }.
 UI.openModals = new Set();
@@ -359,6 +369,22 @@ UI.icons = {
   hourglass:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4.17a2 2 0 0 0-.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22M7 2v4.17a2 2 0 0 0 .59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
+  help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>',
+  collapse:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+  kanban:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="14" rx="1"/><rect x="10" y="3" width="5" height="9" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>',
+  calendar:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+  activity:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+  building:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M12 10h.01M12 14h.01M16 10h.01M16 14h.01M8 10h.01M8 14h.01"/></svg>',
+  rocket:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09zM12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>',
+  trophy:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4zM17 5h3a2 2 0 0 1-2 4h-1M7 5H4a2 2 0 0 0 2 4h1"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><path d="M3 12h18M3 6h18M3 18h18"/></svg>',
 };
 

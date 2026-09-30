@@ -7,7 +7,7 @@ const { requireAuth, isManager } = require('../middleware/auth');
 const { notFound, forbidden } = require('../lib/errors');
 const { audit } = require('../lib/audit');
 const { notify } = require('../lib/notify');
-const { localDate, todaySql } = require('../lib/timezone');
+const { localDate, todaySql, isDateString } = require('../lib/timezone');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -51,6 +51,15 @@ router.get('/', async (req, res, next) => {
     if (req.query.customer_id) {
       params.push(Number(req.query.customer_id));
       where.push(`t.customer_id = $${params.length}`);
+    }
+    if (req.query.q) {
+      params.push(`%${String(req.query.q).trim()}%`);
+      where.push(`(t.title ILIKE $${params.length} OR c.name ILIKE $${params.length})`);
+    }
+    // Intervalo de prazo (visão de calendário): datas AAAA-MM-DD no fuso da empresa
+    if (isDateString(req.query.from) && isDateString(req.query.to)) {
+      params.push(req.query.from, req.query.to);
+      where.push(`${localDate('t.due_at')} BETWEEN $${params.length - 1}::date AND $${params.length}::date`);
     }
     const { rows } = await query(
       `${SELECT} WHERE ${where.join(' AND ')} ORDER BY t.done_at NULLS FIRST, t.due_at NULLS LAST, t.created_at DESC LIMIT 500`,

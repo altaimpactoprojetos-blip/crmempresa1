@@ -18,8 +18,10 @@ function loadUser(req, _res, next) {
     try {
       const { rows } = await query(
         `SELECT u.id, u.company_id, u.name, u.email, u.role, u.active, u.available,
-                c.status AS company_status, c.trial_ends_at, c.plan, c.current_period_end, c.past_due_since
-         FROM users u JOIN companies c ON c.id = u.company_id WHERE u.id = $1`,
+                c.status AS company_status, c.trial_ends_at, c.plan, c.current_period_end, c.past_due_since,
+                cs.permissions
+         FROM users u JOIN companies c ON c.id = u.company_id
+         LEFT JOIN company_settings cs ON cs.company_id = u.company_id WHERE u.id = $1`,
         [userId],
       );
       const user = rows[0];
